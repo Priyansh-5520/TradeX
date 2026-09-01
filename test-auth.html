@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>TradeX - Get Google ID Token</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+    .container {
+      text-align: center;
+      max-width: 700px;
+      padding: 40px;
+    }
+    h1 { color: #00d4ff; margin-bottom: 8px; }
+    p { color: #888; margin-bottom: 30px; }
+    #token-box {
+      display: none;
+      margin-top: 30px;
+      text-align: left;
+    }
+    #token-box label {
+      display: block;
+      color: #00d4ff;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    textarea {
+      width: 100%;
+      height: 120px;
+      background: #0d0d1a;
+      color: #0f0;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+    button {
+      margin-top: 12px;
+      padding: 10px 24px;
+      background: #00d4ff;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #00b8d9; }
+    .status { color: #4caf50; margin-top: 10px; }
+    .instructions {
+      margin-top: 30px;
+      text-align: left;
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .instructions code {
+      background: #0d0d1a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #00d4ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔑 TradeX Auth Tester</h1>
+    <p>Sign in with Google to get your ID Token for Postman testing</p>
+
+    <!-- Google Sign In Button -->
+    <div id="g_id_onload"
+         data-client_id="562070236479-amcieqcrp9irseufuml9gq6g58r61qd2.apps.googleusercontent.com"
+         data-callback="handleCredentialResponse"
+         data-theme="filled_blue"
+         data-size="large"
+         data-text="signin_with"
+         data-shape="rectangular">
+    </div>
+    <div class="g_id_signin" data-type="standard"></div>
+
+    <!-- Token Display -->
+    <div id="token-box">
+      <label>✅ Your Google ID Token (copy this for Postman):</label>
+      <textarea id="token-text" readonly></textarea>
+      <button onclick="copyToken()">📋 Copy Token</button>
+      <div class="status" id="copy-status"></div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="instructions">
+      <strong>📝 How to use:</strong><br><br>
+      <strong>Step 0:</strong> Replace <code>YOUR_GOOGLE_CLIENT_ID_HERE</code> in this file (line ~79) with your actual Google Client ID.<br><br>
+      <strong>Step 1:</strong> Click "Sign in with Google" above.<br><br>
+      <strong>Step 2:</strong> Copy the token shown below.<br><br>
+      <strong>Step 3:</strong> In Postman, send a <code>POST</code> to <code>http://localhost:5000/api/auth/google</code> with body:<br>
+      <code>{ "idToken": "PASTE_TOKEN_HERE" }</code><br><br>
+      <strong>Step 4:</strong> If you get <code>isNewUser: true</code>, send a <code>POST</code> to <code>http://localhost:5000/api/auth/complete-signup</code> with body:<br>
+      <code>{ "idToken": "PASTE_TOKEN_HERE", "userName": "your_username" }</code>
+    </div>
+  </div>
+
+  <script>
+    function handleCredentialResponse(response) {
+      const tokenBox = document.getElementById('token-box');
+      const tokenText = document.getElementById('token-text');
+      
+      tokenText.value = response.credential;
+      tokenBox.style.display = 'block';
+      
+      // Decode and show basic info
+      const payload = JSON.parse(atob(response.credential.split('.')[1]));
+      console.log('Google User:', payload.email, payload.name);
+    }
+
+    function copyToken() {
+      const tokenText = document.getElementById('token-text');
+      tokenText.select();
+      navigator.clipboard.writeText(tokenText.value);
+      document.getElementById('copy-status').textContent = '✅ Copied to clipboard!';
+      setTimeout(() => {
+        document.getElementById('copy-status').textContent = '';
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

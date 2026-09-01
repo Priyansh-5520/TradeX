@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const analysisController = require("../controllers/analysisController");
+const tradeController = require("../controllers/tradeController");
+const { protect } = require("../middleware/auth");
 
-router.get("/:userId", analysisController.getTransactions);
+router.get("/", protect, tradeController.getTransactions);
 
 module.exports = router;

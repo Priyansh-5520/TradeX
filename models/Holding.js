@@ -19,10 +19,6 @@ const holdingSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
-    currentProfit: {
-      type: Number,
-      default: 0,
-    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
