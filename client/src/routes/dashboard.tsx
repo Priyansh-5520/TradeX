@@ -1,21 +1,47 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Activity, Clock3, Lock, TrendingDown, TrendingUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/app-header";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
-import { stockApi, tradeApi, holdingApi, userApi, type QuoteData } from "@/lib/api";
+import {
+  stockApi,
+  tradeApi,
+  holdingApi,
+  userApi,
+  marketApi,
+  type MarketStatus,
+  type QuoteData,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
     meta: [
       { title: "Trading Dashboard — TradeX" },
-      { name: "description", content: "Practice stock trading with live-style market data on TradeX." },
+      {
+        name: "description",
+        content: "Practice stock trading with live-style market data on TradeX.",
+      },
       { property: "og:title", content: "Trading Dashboard — TradeX" },
       { property: "og:description", content: "A premium risk-free stock trading workspace." },
       { property: "og:type", content: "website" },
@@ -26,7 +52,13 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const periodMap: Record<string, string> = {
-  "1D": "1d", "5D": "5d", "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y",
+  "1D": "1d",
+  "5D": "5d",
+  "1M": "1mo",
+  "3M": "3mo",
+  "6M": "6mo",
+  "1Y": "1y",
+  "5Y": "5y",
 };
 const periods = Object.keys(periodMap);
 
@@ -43,6 +75,8 @@ function DashboardPage() {
   const [side, setSide] = useState<"BUY" | "SELL" | null>(null);
   const [cash, setCash] = useState(0);
   const [portfolioValue, setPortfolioValue] = useState(0);
+  const [market, setMarket] = useState<MarketStatus | null>(null);
+  const [marketLoading, setMarketLoading] = useState(true);
 
   // Redirect to auth if not logged in
   useEffect(() => {
@@ -85,33 +119,71 @@ function DashboardPage() {
 
       // Estimate portfolio value from holdings
       const holdingsRes = await holdingApi.getPortfolio();
-      let holdingValue = 0;
-      for (const h of holdingsRes.data) {
-        try {
-          const q = await stockApi.getQuote(h.symbol);
-          holdingValue += q.data.price * h.quantity;
-        } catch { /* skip */ }
-      }
-      setPortfolioValue(holdingValue + profileRes.data.virtualCash);
+      setPortfolioValue(holdingsRes.data.summary.totalCurrentValue + profileRes.data.virtualCash);
     } catch (err) {
       console.error("User stats error:", err);
     }
   }, []);
 
-  // Initial load
+  const fetchMarketStatus = useCallback(async () => {
+    try {
+      const res = await marketApi.getStatus();
+      setMarket(res.data);
+    } catch (err) {
+      console.error("Market status error:", err);
+      setMarket(null);
+    } finally {
+      setMarketLoading(false);
+    }
+  }, []);
+
+  // Keep the market state fresh so the page automatically unlocks when the
+  // regular session begins (and locks again when it ends).
   useEffect(() => {
     if (!user) return;
+    fetchMarketStatus();
+    const timer = window.setInterval(fetchMarketStatus, 60_000);
+    return () => window.clearInterval(timer);
+  }, [user, fetchMarketStatus]);
+
+  // Fetch quote data only during the regular US market session.
+  useEffect(() => {
+    if (!user || marketLoading) return;
     setLoading(true);
-    Promise.all([fetchQuote(symbol), fetchChart(symbol, period), fetchUserStats()])
-      .finally(() => setLoading(false));
-  }, [user, symbol, period, fetchQuote, fetchChart, fetchUserStats]);
+    const requests = [fetchUserStats()];
+    if (market?.isOpen) {
+      requests.push(fetchQuote(symbol), fetchChart(symbol, period));
+    } else {
+      setQuote(null);
+      setChartData([]);
+    }
+    Promise.all(requests).finally(() => setLoading(false));
+  }, [user, symbol, period, market, marketLoading, fetchQuote, fetchChart, fetchUserStats]);
 
   const choose = (sym: string) => {
     setLoading(true);
     setSymbol(sym);
   };
 
-  if (authLoading) return <div className="grid min-h-screen place-items-center bg-background"><Skeleton className="h-8 w-48" /></div>;
+  const nextOpen = market?.nextOpen
+    ? new Date(market.nextOpen).toLocaleString("en-US", {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "America/New_York",
+        timeZoneName: "short",
+      })
+    : null;
+  const marketMessage = market
+    ? `US market is closed. ${nextOpen ? `Next regular session: ${nextOpen}.` : ""}`
+    : "Market status is temporarily unavailable.";
+
+  if (authLoading)
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Skeleton className="h-8 w-48" />
+      </div>
+    );
 
   return (
     <div className="min-h-screen bg-background">
@@ -119,31 +191,91 @@ function DashboardPage() {
       <main className="mx-auto max-w-[1600px] p-4 sm:p-6">
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">US Markets</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              US Markets
+            </p>
             <h1 className="mt-1 text-xl font-semibold">Trading dashboard</h1>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="size-2 animate-pulse rounded-full bg-profit" />
-            Market open <span className="hidden sm:inline">• Closes 4:00 PM</span>
+            <span
+              className={`size-2 rounded-full ${market?.isOpen ? "animate-pulse bg-profit" : "bg-loss"}`}
+            />
+            {market?.isOpen
+              ? "Market open"
+              : marketLoading
+                ? "Checking market status…"
+                : "Market closed"}
+            {market?.isOpen && <span className="hidden sm:inline">• Closes 4:00 PM ET</span>}
           </div>
         </div>
+        {!marketLoading && !market?.isOpen && (
+          <div className="mb-4 rounded-md border border-loss/30 bg-loss/10 px-4 py-3 text-sm text-loss">
+            {marketMessage}
+          </div>
+        )}
         <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
-          <StockInfo quote={quote} loading={loading} onTrade={setSide} />
-          <ChartPanel quote={quote} chartData={chartData} period={period} setPeriod={setPeriod} loading={loading} />
-          <Watchlist selected={symbol} onSelect={choose} loading={loading} />
+          <StockInfo
+            quote={quote}
+            loading={loading}
+            onTrade={setSide}
+            isMarketOpen={Boolean(market?.isOpen)}
+            message={marketMessage}
+          />
+          <ChartPanel
+            quote={quote}
+            chartData={chartData}
+            period={period}
+            setPeriod={setPeriod}
+            loading={loading}
+            isMarketOpen={Boolean(market?.isOpen)}
+            message={marketMessage}
+          />
+          <Watchlist
+            selected={symbol}
+            onSelect={choose}
+            loading={loading}
+            isMarketOpen={Boolean(market?.isOpen)}
+            message={marketMessage}
+          />
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Metric label="Cash balance" value={`$${cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
-          <Metric label="Portfolio value" value={`$${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
+          <Metric
+            label="Cash balance"
+            value={`$${cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          />
+          <Metric
+            label="Portfolio value"
+            value={`$${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          />
           <Metric label="Day P&L" value="—" />
         </div>
       </main>
-      {quote && <TradeDialog quote={quote} side={side} onClose={() => setSide(null)} onSuccess={fetchUserStats} />}
+      {quote && market?.isOpen && (
+        <TradeDialog
+          quote={quote}
+          side={side}
+          onClose={() => setSide(null)}
+          onSuccess={fetchUserStats}
+        />
+      )}
     </div>
   );
 }
 
-function StockInfo({ quote, loading, onTrade }: { quote: QuoteData | null; loading: boolean; onTrade: (side: "BUY" | "SELL") => void }) {
+function StockInfo({
+  quote,
+  loading,
+  onTrade,
+  isMarketOpen,
+  message,
+}: {
+  quote: QuoteData | null;
+  loading: boolean;
+  onTrade: (side: "BUY" | "SELL") => void;
+  isMarketOpen: boolean;
+  message: string;
+}) {
+  if (!isMarketOpen) return <MarketClosedPanel message={message} className="min-h-[590px]" />;
   if (loading || !quote) return <Skeleton className="h-[590px] rounded-lg" />;
   const formatNum = (n: number) => {
     if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
@@ -152,17 +284,22 @@ function StockInfo({ quote, loading, onTrade }: { quote: QuoteData | null; loadi
     return n.toLocaleString();
   };
   const rows = [
-    ["Day high", `$${quote.high?.toFixed(2) ?? "—"}`],
-    ["Day low", `$${quote.low?.toFixed(2) ?? "—"}`],
+    ["Day high", `$${quote.dayHigh?.toFixed(2) ?? "—"}`],
+    ["Day low", `$${quote.dayLow?.toFixed(2) ?? "—"}`],
     ["Volume", formatNum(quote.volume || 0)],
     ["Market cap", formatNum(quote.marketCap || 0)],
-    ["52-week range", `$${quote.fiftyTwoWeekLow?.toFixed(2) ?? "?"} — $${quote.fiftyTwoWeekHigh?.toFixed(2) ?? "?"}`],
+    [
+      "52-week range",
+      `$${quote.fiftyTwoWeekLow?.toFixed(2) ?? "?"} — $${quote.fiftyTwoWeekHigh?.toFixed(2) ?? "?"}`,
+    ],
   ];
   return (
     <section className="panel flex min-h-[590px] flex-col p-5">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2">
-          <span className="grid size-10 place-items-center rounded-md bg-secondary font-bold text-primary">{quote.symbol[0]}</span>
+          <span className="grid size-10 place-items-center rounded-md bg-secondary font-bold text-primary">
+            {quote.symbol[0]}
+          </span>
           <div>
             <h2 className="font-bold">{quote.symbol}</h2>
             <p className="max-w-36 truncate text-xs text-muted-foreground">{quote.name}</p>
@@ -170,7 +307,9 @@ function StockInfo({ quote, loading, onTrade }: { quote: QuoteData | null; loadi
         </div>
         <div className="flex items-center gap-1.5">
           {quote.priceSource && (
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${quote.priceSource?.includes("websocket") ? "border border-profit/30 bg-profit/10 text-profit" : "border border-yellow-500/30 bg-yellow-500/10 text-yellow-500"}`}>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${quote.priceSource?.includes("websocket") ? "border border-profit/30 bg-profit/10 text-profit" : "border border-yellow-500/30 bg-yellow-500/10 text-yellow-500"}`}
+            >
               {quote.priceSource?.includes("websocket") ? "Real-time" : "Delayed"}
             </span>
           )}
@@ -179,9 +318,16 @@ function StockInfo({ quote, loading, onTrade }: { quote: QuoteData | null; loadi
       </div>
       <div className="mt-8">
         <p className="text-4xl font-bold tabular-nums">${quote.price?.toFixed(2)}</p>
-        <p className={`mt-2 flex items-center gap-1 text-sm font-semibold ${(quote.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}>
-          {(quote.changePercent ?? 0) >= 0 ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
-          {(quote.changePercent ?? 0) >= 0 ? "+" : ""}{quote.changePercent?.toFixed(2)}%
+        <p
+          className={`mt-2 flex items-center gap-1 text-sm font-semibold ${(quote.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}
+        >
+          {(quote.changePercent ?? 0) >= 0 ? (
+            <TrendingUp className="size-4" />
+          ) : (
+            <TrendingDown className="size-4" />
+          )}
+          {(quote.changePercent ?? 0) >= 0 ? "+" : ""}
+          {quote.changePercent?.toFixed(2)}%
           <span className="font-normal text-muted-foreground">today</span>
         </p>
       </div>
@@ -195,14 +341,41 @@ function StockInfo({ quote, loading, onTrade }: { quote: QuoteData | null; loadi
         ))}
       </dl>
       <div className="mt-auto grid grid-cols-2 gap-3 pt-8">
-        <Button onClick={() => onTrade("BUY")} className="h-11 bg-profit text-profit-foreground hover:bg-profit/90">Buy</Button>
-        <Button onClick={() => onTrade("SELL")} className="h-11 bg-loss text-loss-foreground hover:bg-loss/90">Sell</Button>
+        <Button
+          onClick={() => onTrade("BUY")}
+          className="h-11 bg-profit text-profit-foreground hover:bg-profit/90"
+        >
+          Buy
+        </Button>
+        <Button
+          onClick={() => onTrade("SELL")}
+          className="h-11 bg-loss text-loss-foreground hover:bg-loss/90"
+        >
+          Sell
+        </Button>
       </div>
     </section>
   );
 }
 
-function ChartPanel({ quote, chartData, period, setPeriod, loading }: { quote: QuoteData | null; chartData: ChartPoint[]; period: string; setPeriod: (p: string) => void; loading: boolean }) {
+function ChartPanel({
+  quote,
+  chartData,
+  period,
+  setPeriod,
+  loading,
+  isMarketOpen,
+  message,
+}: {
+  quote: QuoteData | null;
+  chartData: ChartPoint[];
+  period: string;
+  setPeriod: (p: string) => void;
+  loading: boolean;
+  isMarketOpen: boolean;
+  message: string;
+}) {
+  if (!isMarketOpen) return <MarketClosedPanel message={message} className="min-h-[590px]" />;
   return (
     <section className="panel min-w-0 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -217,12 +390,20 @@ function ChartPanel({ quote, chartData, period, setPeriod, loading }: { quote: Q
       </div>
       <div className="mt-5 flex gap-1 overflow-x-auto rounded-md bg-secondary/50 p-1">
         {periods.map((item) => (
-          <Button key={item} size="sm" variant={period === item ? "secondary" : "ghost"} onClick={() => setPeriod(item)} className={period === item ? "text-primary" : "text-muted-foreground"}>
+          <Button
+            key={item}
+            size="sm"
+            variant={period === item ? "secondary" : "ghost"}
+            onClick={() => setPeriod(item)}
+            className={period === item ? "text-primary" : "text-muted-foreground"}
+          >
             {item}
           </Button>
         ))}
       </div>
-      {loading ? <Skeleton className="mt-6 h-[430px]" /> : (
+      {loading ? (
+        <Skeleton className="mt-6 h-[430px]" />
+      ) : (
         <div className="mt-5 h-[430px]">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 12, right: 4, left: -16, bottom: 0 }}>
@@ -233,10 +414,32 @@ function ChartPanel({ quote, chartData, period, setPeriod, loading }: { quote: Q
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" vertical={false} />
-              <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
-              <YAxis domain={["dataMin - 4", "dataMax + 4"]} axisLine={false} tickLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6 }} />
-              <Area type="monotone" dataKey="price" stroke="var(--primary)" strokeWidth={2.5} fill="url(#priceFill)" />
+              <XAxis
+                dataKey="time"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              />
+              <YAxis
+                domain={["dataMin - 4", "dataMax + 4"]}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--popover)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="price"
+                stroke="var(--primary)"
+                strokeWidth={2.5}
+                fill="url(#priceFill)"
+              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -249,19 +452,52 @@ function ChartPanel({ quote, chartData, period, setPeriod, loading }: { quote: Q
   );
 }
 
+function MarketClosedPanel({ message, className = "" }: { message: string; className?: string }) {
+  return (
+    <section className={`panel grid place-items-center p-6 text-center ${className}`}>
+      <div className="max-w-sm">
+        <Clock3 className="mx-auto size-8 text-loss" />
+        <h2 className="mt-3 font-semibold">Market closed</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Live quotes and paper trading resume during the next regular US market session.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 // Watchlist — uses a hardcoded list of popular symbols and fetches live quotes
 const WATCHLIST_SYMBOLS = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"];
 
-function Watchlist({ selected, onSelect, loading }: { selected: string; onSelect: (sym: string) => void; loading: boolean }) {
+function Watchlist({
+  selected,
+  onSelect,
+  loading,
+  isMarketOpen,
+  message,
+}: {
+  selected: string;
+  onSelect: (sym: string) => void;
+  loading: boolean;
+  isMarketOpen: boolean;
+  message: string;
+}) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
 
   useEffect(() => {
+    if (!isMarketOpen) return;
     WATCHLIST_SYMBOLS.forEach((sym) => {
-      stockApi.getQuote(sym)
+      stockApi
+        .getQuote(sym)
         .then((res) => setQuotes((prev) => ({ ...prev, [sym]: res.data })))
-        .catch(() => { /* ignore individual failures */ });
+        .catch(() => {
+          /* ignore individual failures */
+        });
     });
-  }, []);
+  }, [isMarketOpen]);
+
+  if (!isMarketOpen) return <MarketClosedPanel message={message} />;
 
   return (
     <section className="panel overflow-hidden">
@@ -274,7 +510,12 @@ function Watchlist({ selected, onSelect, loading }: { selected: string; onSelect
       <div className="divide-y divide-border">
         {WATCHLIST_SYMBOLS.map((sym) => {
           const q = quotes[sym];
-          if (loading && !q) return <div key={sym} className="p-4"><Skeleton className="h-12" /></div>;
+          if (loading && !q)
+            return (
+              <div key={sym} className="p-4">
+                <Skeleton className="h-12" />
+              </div>
+            );
           return (
             <button
               key={sym}
@@ -283,12 +524,17 @@ function Watchlist({ selected, onSelect, loading }: { selected: string; onSelect
             >
               <div>
                 <p className="text-sm font-bold">{sym}</p>
-                <p className="max-w-24 truncate text-xs text-muted-foreground">{q?.name ?? "..."}</p>
+                <p className="max-w-24 truncate text-xs text-muted-foreground">
+                  {q?.name ?? "..."}
+                </p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold tabular-nums">${q?.price?.toFixed(2) ?? "—"}</p>
-                <p className={`text-xs ${(q?.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}>
-                  {(q?.changePercent ?? 0) >= 0 ? "+" : ""}{q?.changePercent?.toFixed(2) ?? "0.00"}%
+                <p
+                  className={`text-xs ${(q?.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}
+                >
+                  {(q?.changePercent ?? 0) >= 0 ? "+" : ""}
+                  {q?.changePercent?.toFixed(2) ?? "0.00"}%
                 </p>
               </div>
             </button>
@@ -299,19 +545,41 @@ function Watchlist({ selected, onSelect, loading }: { selected: string; onSelect
   );
 }
 
-function Metric({ label, value, change, positive }: { label: string; value: string; change?: string; positive?: boolean }) {
+function Metric({
+  label,
+  value,
+  change,
+  positive,
+}: {
+  label: string;
+  value: string;
+  change?: string;
+  positive?: boolean;
+}) {
   return (
     <div className="panel flex items-center justify-between px-5 py-4">
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`mt-1 text-lg font-bold tabular-nums ${positive ? "text-profit" : ""}`}>{value}</p>
+        <p className={`mt-1 text-lg font-bold tabular-nums ${positive ? "text-profit" : ""}`}>
+          {value}
+        </p>
       </div>
       {change && <span className="text-xs text-profit">{change}</span>}
     </div>
   );
 }
 
-function TradeDialog({ quote, side, onClose, onSuccess }: { quote: QuoteData; side: "BUY" | "SELL" | null; onClose: () => void; onSuccess: () => void }) {
+function TradeDialog({
+  quote,
+  side,
+  onClose,
+  onSuccess,
+}: {
+  quote: QuoteData;
+  side: "BUY" | "SELL" | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [quantity, setQuantity] = useState(1);
   const [countdown, setCountdown] = useState(0);
   const [quoteId, setQuoteId] = useState<string | null>(null);
@@ -319,8 +587,29 @@ function TradeDialog({ quote, side, onClose, onSuccess }: { quote: QuoteData; si
   const [submitting, setSubmitting] = useState(false);
   const locked = countdown > 0;
 
-  useEffect(() => { if (!side) { setCountdown(0); setQuantity(1); setQuoteId(null); setLockedPrice(null); } }, [side]);
-  useEffect(() => { if (!countdown) return; const timer = window.setInterval(() => setCountdown((v) => { if (v <= 1) { setQuoteId(null); setLockedPrice(null); } return Math.max(0, v - 1); }), 1000); return () => window.clearInterval(timer); }, [countdown]);
+  useEffect(() => {
+    if (!side) {
+      setCountdown(0);
+      setQuantity(1);
+      setQuoteId(null);
+      setLockedPrice(null);
+    }
+  }, [side]);
+  useEffect(() => {
+    if (!countdown) return;
+    const timer = window.setInterval(
+      () =>
+        setCountdown((v) => {
+          if (v <= 1) {
+            setQuoteId(null);
+            setLockedPrice(null);
+          }
+          return Math.max(0, v - 1);
+        }),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [countdown]);
 
   const displayPrice = lockedPrice ?? quote.price;
   const total = useMemo(() => displayPrice * Math.max(0, quantity), [displayPrice, quantity]);
@@ -331,7 +620,9 @@ function TradeDialog({ quote, side, onClose, onSuccess }: { quote: QuoteData; si
       setQuoteId(res.data.quoteId);
       setLockedPrice(res.data.price);
       setCountdown(10);
-      toast.success("Price locked!", { description: `$${res.data.price.toFixed(2)} for 10 seconds` });
+      toast.success("Price locked!", {
+        description: `$${res.data.price.toFixed(2)} for 10 seconds`,
+      });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to lock price";
       toast.error(message);
@@ -361,31 +652,67 @@ function TradeDialog({ quote, side, onClose, onSuccess }: { quote: QuoteData; si
     <Dialog open={Boolean(side)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="border-border bg-popover sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl">{side === "BUY" ? "Buy" : "Sell"} {quote.symbol}</DialogTitle>
-          <DialogDescription>{quote.name} · {locked ? "Locked quote" : "Market order"}</DialogDescription>
+          <DialogTitle className="text-xl">
+            {side === "BUY" ? "Buy" : "Sell"} {quote.symbol}
+          </DialogTitle>
+          <DialogDescription>
+            {quote.name} · {locked ? "Locked quote" : "Market order"}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 py-2">
           <div className="rounded-md border border-border bg-secondary/40 p-4">
             <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">{locked ? "Locked price" : "Current price"}</span>
+              <span className="text-sm text-muted-foreground">
+                {locked ? "Locked price" : "Current price"}
+              </span>
               <b className="tabular-nums">${displayPrice.toFixed(2)}</b>
             </div>
           </div>
           <div>
-            <label htmlFor="quantity" className="mb-2 block text-sm font-medium">Quantity</label>
-            <Input id="quantity" type="number" min="1" value={quantity} onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))} className="h-11" />
+            <label htmlFor="quantity" className="mb-2 block text-sm font-medium">
+              Quantity
+            </label>
+            <Input
+              id="quantity"
+              type="number"
+              min="1"
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+              className="h-11"
+            />
           </div>
           <div className="flex items-end justify-between border-y border-border py-4">
             <div>
               <p className="text-xs text-muted-foreground">Estimated total</p>
               <p className="mt-1 text-2xl font-bold tabular-nums">
-                ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                $
+                {total.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </p>
             </div>
-            <span className="text-xs text-muted-foreground">{locked ? "Locked quote" : "Market price"}</span>
+            <span className="text-xs text-muted-foreground">
+              {locked ? "Locked quote" : "Market price"}
+            </span>
           </div>
-          <Button variant="outline" onClick={handleLock} disabled={locked} className="h-11 w-full border-primary/30 text-primary hover:bg-primary/10">
-            {locked ? <><Clock3 />Locked for {countdown}s</> : <><Lock />Lock price for 10 seconds</>}
+          <Button
+            variant="outline"
+            onClick={handleLock}
+            disabled={locked}
+            className="h-11 w-full border-primary/30 text-primary hover:bg-primary/10"
+          >
+            {locked ? (
+              <>
+                <Clock3 />
+                Locked for {countdown}s
+              </>
+            ) : (
+              <>
+                <Lock />
+                Lock price for 10 seconds
+              </>
+            )}
           </Button>
         </div>
         <DialogFooter>

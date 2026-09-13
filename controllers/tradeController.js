@@ -1,7 +1,18 @@
 const tradeService = require("../services/tradeService");
 const stockService = require("../services/stockService");
 const quoteLock = require("../services/quoteLock");
+const alpacaStream = require("../services/alpacaStream");
 const ApiError = require("../utils/ApiError");
+
+const requireOpenMarket = async () => {
+  const market = await alpacaStream.getMarketStatus();
+  if (!market) {
+    throw ApiError.badRequest("Market status is unavailable. Please try again shortly.");
+  }
+  if (!market.isOpen) {
+    throw ApiError.badRequest("The US stock market is closed. Trading is available during regular market hours only.");
+  }
+};
 
 /**
  * POST /api/trade/lock-quote
@@ -12,6 +23,7 @@ const ApiError = require("../utils/ApiError");
  */
 const lockQuote = async (req, res, next) => {
   try {
+    await requireOpenMarket();
     const { symbol } = req.body;
 
     if (!symbol) {
@@ -43,6 +55,7 @@ const lockQuote = async (req, res, next) => {
  */
 const buyStock = async (req, res, next) => {
   try {
+    await requireOpenMarket();
     const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {
@@ -73,6 +86,7 @@ const buyStock = async (req, res, next) => {
  */
 const sellStock = async (req, res, next) => {
   try {
+    await requireOpenMarket();
     const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {

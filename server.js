@@ -30,6 +30,18 @@ app.use("/api/holdings", holdingRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/transactions", transactionRoutes);
 
+app.get("/api/market/status", async (req, res, next) => {
+  try {
+    const market = await alpacaStream.getMarketStatus();
+    if (!market) {
+      return res.status(503).json({ success: false, error: "Market status is unavailable" });
+    }
+    return res.status(200).json({ success: true, data: market });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok" });

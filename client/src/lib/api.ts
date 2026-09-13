@@ -1,7 +1,10 @@
 // ─── API Client for TradeX Backend ───
 // All API calls go through here so the JWT token is attached automatically.
 
-const API_BASE = "http://localhost:5000/api";
+// In local development this is proxied by Vite to the Express server.  Set
+// VITE_API_URL (for example, https://api.example.com/api) when the two apps
+// are deployed on different origins.
+const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -16,10 +19,7 @@ export function clearToken() {
   localStorage.removeItem("tradex_token");
 }
 
-async function request<T = unknown>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function request<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -48,20 +48,19 @@ export const authApi = {
   googleLogin: (idToken: string) =>
     request<{ isNewUser: boolean; token?: string; user?: UserData; email?: string }>(
       "/auth/google",
-      { method: "POST", body: JSON.stringify({ idToken }) }
+      { method: "POST", body: JSON.stringify({ idToken }) },
     ),
 
   completeSignup: (idToken: string, userName: string) =>
-    request<{ token: string; user: UserData }>(
-      "/auth/complete-signup",
-      { method: "POST", body: JSON.stringify({ idToken, userName }) }
-    ),
+    request<{ token: string; user: UserData }>("/auth/complete-signup", {
+      method: "POST",
+      body: JSON.stringify({ idToken, userName }),
+    }),
 
   checkUsername: (userName: string) =>
     request<{ available: boolean }>(`/auth/check-username/${userName}`),
 
-  getMe: () =>
-    request<{ user: UserData }>("/auth/me"),
+  getMe: () => request<{ user: UserData }>("/auth/me"),
 };
 
 // ─── Stocks ───
@@ -70,10 +69,18 @@ export const stockApi = {
     request<{ success: boolean; data: QuoteData }>(`/stocks/quote/${symbol}`),
 
   search: (q: string) =>
-    request<{ success: boolean; count: number; data: SearchResult[] }>(`/stocks/search?q=${encodeURIComponent(q)}`),
+    request<{ success: boolean; count: number; data: SearchResult[] }>(
+      `/stocks/search?q=${encodeURIComponent(q)}`,
+    ),
 
   getHistory: (symbol: string, period = "1mo") =>
-    request<{ success: boolean; data: HistoryPoint[] }>(`/stocks/history/${symbol}?period=${period}`),
+    request<{ success: boolean; data: HistoryPoint[] }>(
+      `/stocks/history/${symbol}?period=${period}`,
+    ),
+};
+
+export const marketApi = {
+  getStatus: () => request<{ success: boolean; data: MarketStatus }>("/market/status"),
 };
 
 // ─── Trade ───
@@ -99,14 +106,12 @@ export const tradeApi = {
 
 // ─── Holdings ───
 export const holdingApi = {
-  getPortfolio: () =>
-    request<{ success: boolean; data: HoldingData[] }>("/holdings"),
+  getPortfolio: () => request<{ success: boolean; data: PortfolioData }>("/holdings"),
 };
 
 // ─── User ───
 export const userApi = {
-  getProfile: () =>
-    request<{ success: boolean; data: ProfileData }>("/user/profile"),
+  getProfile: () => request<{ success: boolean; data: ProfileData }>("/user/profile"),
 };
 
 // ─── Transactions ───
@@ -118,7 +123,7 @@ export const transactionApi = {
     if (filters?.limit) params.set("limit", String(filters.limit));
     const qs = params.toString();
     return request<{ success: boolean; count: number; data: TransactionData[] }>(
-      `/transactions${qs ? `?${qs}` : ""}`
+      `/transactions${qs ? `?${qs}` : ""}`,
     );
   },
 };
@@ -138,14 +143,21 @@ export type QuoteData = {
   price: number;
   change: number;
   changePercent: number;
-  high: number;
-  low: number;
+  dayHigh: number;
+  dayLow: number;
   volume: number;
   marketCap: number;
   fiftyTwoWeekHigh: number;
   fiftyTwoWeekLow: number;
   priceSource?: string;
   priceAgeMs?: number;
+};
+
+export type MarketStatus = {
+  isOpen: boolean;
+  nextOpen: string;
+  nextClose: string;
+  source: string;
 };
 
 export type SearchResult = {
@@ -175,9 +187,25 @@ export type QuoteLock = {
 };
 
 export type HoldingData = {
+  id: string;
   symbol: string;
   quantity: number;
-  avgPrice: number;
+  averageCost: number;
+  totalInvestment: number;
+  currentPrice: number;
+  currentValue: number;
+  profit: number;
+  profitPercentage: number;
+};
+
+export type PortfolioData = {
+  holdings: HoldingData[];
+  summary: {
+    totalInvested: number;
+    totalCurrentValue: number;
+    totalProfit: number;
+    profitPercentage: number;
+  };
 };
 
 export type ProfileData = {

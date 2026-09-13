@@ -219,6 +219,27 @@ const getStatus = () => ({
   cachedPrices: priceCache.size(),
 });
 
+/**
+ * Return Alpaca's official US market clock. It includes exchange holidays and
+ * early closes, unlike a basic weekday/time calculation.
+ */
+const getMarketStatus = async () => {
+  if (!alpaca && !initClient()) return null;
+
+  try {
+    const clock = await alpaca.trading.clock.legacyClock();
+    return {
+      isOpen: clock.isOpen,
+      nextOpen: clock.nextOpen,
+      nextClose: clock.nextClose,
+      source: "alpaca",
+    };
+  } catch (error) {
+    console.warn("Could not retrieve Alpaca market clock:", error.message);
+    return null;
+  }
+};
+
 module.exports = {
   connect,
   subscribe,
@@ -226,5 +247,6 @@ module.exports = {
   disconnect,
   getSnapshotPrice,
   getStatus,
+  getMarketStatus,
   initClient,
 };

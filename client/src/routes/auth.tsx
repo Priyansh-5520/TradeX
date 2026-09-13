@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { useGoogleLogin } from "@react-oauth/google";
+import { GoogleLogin } from "@react-oauth/google";
 import { toast } from "sonner";
 import { TradeXLogo } from "@/components/tradex-logo";
 import { Button } from "@/components/ui/button";
@@ -24,17 +24,6 @@ export const Route = createFileRoute("/auth")({
   }),
   component: AuthPage,
 });
-
-function GoogleMark() {
-  return (
-    <svg className="size-5" viewBox="0 0 48 48">
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-      <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.0 24.0 0 0 0 0 21.56l7.98-6.19z"/>
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-    </svg>
-  );
-}
 
 function AuthPage() {
   const navigate = useNavigate({ from: "/auth" });
@@ -62,7 +51,9 @@ function AuthPage() {
           // New user — show username picker
           setPendingIdToken(idToken);
           setShowSignup(true);
-          toast.info("One more step!", { description: "Choose a username to create your account." });
+          toast.info("One more step!", {
+            description: "Choose a username to create your account.",
+          });
         } else if (res.token && res.user) {
           login(res.token, res.user);
           toast.success("Signed in!", { description: `Welcome back, ${res.user.userName}!` });
@@ -77,22 +68,24 @@ function AuthPage() {
     }
   };
 
-  // Google login via popup — gets the id_token from Google
-  const googleLogin = useGoogleLogin({
-    flow: "implicit",
-    onSuccess: async (tokenResponse) => {
-      // The implicit flow gives us an access_token; we need to exchange it for user info
-      // and then use it as our "idToken" for the backend.
-      // Actually, for simplicity, let's use the 'code' flow or fetch user info.
-      // The backend expects a Google ID token. Let's fetch user info and pass the access_token.
-      // We'll adjust: send the access_token to backend which will verify with Google.
-      handleGoogleAuth(tokenResponse.access_token);
-    },
-    onError: (error) => {
-      console.error("Google login error:", error);
-      toast.error("Google sign-in failed");
-    },
-  });
+  // GoogleLogin returns a signed ID token in `credential`, matching the
+  // backend's google-auth-library verification contract.
+  const googleButton = (
+    <GoogleLogin
+      onSuccess={(credentialResponse) => {
+        if (credentialResponse.credential) {
+          handleGoogleAuth(credentialResponse.credential);
+        } else {
+          toast.error("Google sign-in did not return an ID token");
+        }
+      }}
+      onError={() => toast.error("Google sign-in failed")}
+      theme="filled_black"
+      size="large"
+      width="376"
+      text="continue_with"
+    />
+  );
 
   const handleCompleteSignup = () => {
     if (pendingIdToken && valid) {
@@ -106,16 +99,25 @@ function AuthPage() {
       <div className="particle left-[12%] top-[18%] size-3" />
       <div className="particle right-[16%] top-[28%] size-5 animation-delay-2" />
       <div className="particle bottom-[15%] left-[24%] size-4 animation-delay-4" />
-      <Button asChild variant="ghost" className="absolute left-4 top-4 text-muted-foreground sm:left-8 sm:top-8">
+      <Button
+        asChild
+        variant="ghost"
+        className="absolute left-4 top-4 text-muted-foreground sm:left-8 sm:top-8"
+      >
         <Link to="/">
-          <ArrowLeft />Back
+          <ArrowLeft />
+          Back
         </Link>
       </Button>
       <section className="glass-panel relative z-10 w-full max-w-[440px] p-6 sm:p-8">
-        <div className="mb-8 flex justify-center"><TradeXLogo /></div>
+        <div className="mb-8 flex justify-center">
+          <TradeXLogo />
+        </div>
         <div className="text-center">
           <h1 className="text-2xl font-bold">Welcome to the market</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Trade without risk. Learn without limits.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Trade without risk. Learn without limits.
+          </p>
         </div>
 
         {showSignup ? (
@@ -127,13 +129,17 @@ function AuthPage() {
                 <Input
                   id="username"
                   value={username}
-                  onChange={(event) => setUsername(event.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20))}
+                  onChange={(event) =>
+                    setUsername(event.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20))
+                  }
                   placeholder="marketmaven"
                   className="h-11 pr-10"
                 />
                 {valid && <CheckCircle2 className="absolute right-3 top-3 size-5 text-profit" />}
               </div>
-              <p className="text-xs text-muted-foreground">3–20 characters, letters and numbers only.</p>
+              <p className="text-xs text-muted-foreground">
+                3–20 characters, letters and numbers only.
+              </p>
             </div>
             <Button
               onClick={handleCompleteSignup}
@@ -151,27 +157,29 @@ function AuthPage() {
               <TabsTrigger value="signup">Sign Up</TabsTrigger>
             </TabsList>
             <TabsContent value="signin" className="mt-6">
-              <Button
-                onClick={() => googleLogin()}
-                disabled={loading}
-                variant="outline"
-                className="h-12 w-full bg-foreground text-background hover:bg-foreground/90 hover:text-background"
-              >
-                {loading ? <Loader2 className="animate-spin" /> : <><GoogleMark />Sign in with Google</>}
-              </Button>
+              <div className={loading ? "pointer-events-none opacity-60" : ""}>
+                {loading ? (
+                  <Button disabled className="h-10 w-full">
+                    <Loader2 className="animate-spin" />
+                  </Button>
+                ) : (
+                  googleButton
+                )}
+              </div>
               <p className="mt-5 text-center text-xs text-muted-foreground">
                 By continuing, you agree to the Terms of Service.
               </p>
             </TabsContent>
             <TabsContent value="signup" className="mt-6">
-              <Button
-                onClick={() => googleLogin()}
-                disabled={loading}
-                variant="outline"
-                className="h-12 w-full bg-foreground text-background hover:bg-foreground/90 hover:text-background"
-              >
-                {loading ? <Loader2 className="animate-spin" /> : <><GoogleMark />Continue with Google</>}
-              </Button>
+              <div className={loading ? "pointer-events-none opacity-60" : ""}>
+                {loading ? (
+                  <Button disabled className="h-10 w-full">
+                    <Loader2 className="animate-spin" />
+                  </Button>
+                ) : (
+                  googleButton
+                )}
+              </div>
               <p className="mt-5 text-center text-xs text-muted-foreground">
                 You'll choose a username after Google authentication.
               </p>
@@ -180,7 +188,8 @@ function AuthPage() {
         )}
 
         <div className="mt-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-profit" />Markets operational
+          <span className="size-1.5 rounded-full bg-profit" />
+          Markets operational
         </div>
       </section>
     </main>
