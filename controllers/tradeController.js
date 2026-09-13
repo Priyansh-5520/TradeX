@@ -1,13 +1,49 @@
 const tradeService = require("../services/tradeService");
+const stockService = require("../services/stockService");
+const quoteLock = require("../services/quoteLock");
 const ApiError = require("../utils/ApiError");
 
 /**
+ * POST /api/trade/lock-quote
+ * Body: { symbol: string }
+ *
+ * Locks the current price of a stock for 10 seconds.
+ * The user can then confirm the trade using the returned quoteId.
+ */
+const lockQuote = async (req, res, next) => {
+  try {
+    const { symbol } = req.body;
+
+    if (!symbol) {
+      throw ApiError.badRequest("Symbol is required");
+    }
+
+    // Get the current live price
+    const price = await stockService.getLivePrice(symbol);
+    const priceInfo = stockService.getPriceInfo(symbol);
+
+    // Create a lock for this user
+    const lock = quoteLock.createLock(symbol, price, req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...lock,
+        priceSource: priceInfo?.source || "unknown",
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/trade/buy
- * Body: { symbol: string, quantity: number }
+ * Body: { symbol: string, quantity: number, quoteId?: string, expectedPrice?: number }
  */
 const buyStock = async (req, res, next) => {
   try {
-    const { symbol, quantity } = req.body;
+    const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {
       throw ApiError.badRequest("Symbol and quantity are required");
@@ -17,7 +53,10 @@ const buyStock = async (req, res, next) => {
     const qty = Number(quantity);
     if (isNaN(qty)) throw ApiError.badRequest("Quantity must be a valid number");
 
-    const result = await tradeService.buyStock(req.user.id, symbol, qty);
+    const result = await tradeService.buyStock(req.user.id, symbol, qty, {
+      quoteId,
+      expectedPrice,
+    });
 
     return res.status(200).json({
       success: true,
@@ -30,11 +69,11 @@ const buyStock = async (req, res, next) => {
 
 /**
  * POST /api/trade/sell
- * Body: { symbol: string, quantity: number }
+ * Body: { symbol: string, quantity: number, quoteId?: string, expectedPrice?: number }
  */
 const sellStock = async (req, res, next) => {
   try {
-    const { symbol, quantity } = req.body;
+    const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {
       throw ApiError.badRequest("Symbol and quantity are required");
@@ -43,7 +82,10 @@ const sellStock = async (req, res, next) => {
     const qty = Number(quantity);
     if (isNaN(qty)) throw ApiError.badRequest("Quantity must be a valid number");
 
-    const result = await tradeService.sellStock(req.user.id, symbol, qty);
+    const result = await tradeService.sellStock(req.user.id, symbol, qty, {
+      quoteId,
+      expectedPrice,
+    });
 
     return res.status(200).json({
       success: true,
@@ -79,6 +121,7 @@ const getTransactions = async (req, res, next) => {
 };
 
 module.exports = {
+  lockQuote,
   buyStock,
   sellStock,
   getTransactions
