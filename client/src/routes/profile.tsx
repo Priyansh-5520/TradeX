@@ -205,16 +205,11 @@ function ProfilePage() {
         </section>
 
         {/* Summary cards */}
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
           <Summary
             icon={Wallet}
             label="Cash balance"
             value={`$${cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-          />
-          <Summary
-            icon={CircleDollarSign}
-            label="Portfolio value"
-            value={`$${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
           />
           <Summary
             icon={ChevronDown}

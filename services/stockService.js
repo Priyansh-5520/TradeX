@@ -1,4 +1,5 @@
-const yahooFinance = require("yahoo-finance2").default;
+const YahooFinance = require("yahoo-finance2").default;
+const yahooFinance = new YahooFinance();
 const ApiError = require("../utils/ApiError");
 const priceCache = require("./priceCache");
 const alpacaStream = require("./alpacaStream");
@@ -155,7 +156,44 @@ const search = async (query) => {
  */
 const getHistory = async (symbol, period = "1mo") => {
   try {
-    const result = await yahooFinance.chart(symbol, { period1: period });
+    const now = new Date();
+    const period1 = new Date();
+    let interval = "1d";
+    
+    switch (period) {
+      case "1d":
+        period1.setDate(now.getDate() - 1);
+        interval = "5m"; // Need finer granularity for 1 day
+        break;
+      case "5d":
+        period1.setDate(now.getDate() - 5);
+        interval = "15m"; // Need finer granularity for 5 days
+        break;
+      case "1mo":
+        period1.setMonth(now.getMonth() - 1);
+        break;
+      case "3mo":
+        period1.setMonth(now.getMonth() - 3);
+        break;
+      case "6mo":
+        period1.setMonth(now.getMonth() - 6);
+        break;
+      case "1y":
+        period1.setFullYear(now.getFullYear() - 1);
+        break;
+      case "5y":
+        period1.setFullYear(now.getFullYear() - 5);
+        interval = "1wk";
+        break;
+      case "max":
+        period1.setFullYear(1970);
+        interval = "1mo";
+        break;
+      default:
+        period1.setMonth(now.getMonth() - 1);
+    }
+
+    const result = await yahooFinance.chart(symbol, { period1, interval });
 
     if (!result || !result.quotes || result.quotes.length === 0) {
       throw ApiError.notFound(`No historical data found for symbol: ${symbol}`);

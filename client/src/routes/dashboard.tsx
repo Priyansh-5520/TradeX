@@ -146,19 +146,16 @@ function DashboardPage() {
     return () => window.clearInterval(timer);
   }, [user, fetchMarketStatus]);
 
-  // Fetch quote data only during the regular US market session.
+  // Fetch quote data regardless of whether the market is open so users can see closing prices.
   useEffect(() => {
     if (!user || marketLoading) return;
     setLoading(true);
-    const requests = [fetchUserStats()];
-    if (market?.isOpen) {
-      requests.push(fetchQuote(symbol), fetchChart(symbol, period));
-    } else {
-      setQuote(null);
-      setChartData([]);
-    }
-    Promise.all(requests).finally(() => setLoading(false));
-  }, [user, symbol, period, market, marketLoading, fetchQuote, fetchChart, fetchUserStats]);
+    Promise.all([
+      fetchUserStats(),
+      fetchQuote(symbol),
+      fetchChart(symbol, period)
+    ]).finally(() => setLoading(false));
+  }, [user, symbol, period, marketLoading, fetchQuote, fetchChart, fetchUserStats]);
 
   const choose = (sym: string) => {
     setLoading(true);
@@ -170,7 +167,7 @@ function DashboardPage() {
         weekday: "short",
         hour: "numeric",
         minute: "2-digit",
-        timeZone: "America/New_York",
+        timeZone: "Asia/Kolkata",
         timeZoneName: "short",
       })
     : null;
@@ -205,7 +202,7 @@ function DashboardPage() {
               : marketLoading
                 ? "Checking market status…"
                 : "Market closed"}
-            {market?.isOpen && <span className="hidden sm:inline">• Closes 4:00 PM ET</span>}
+            {market?.isOpen && <span className="hidden sm:inline">• Closes 1:30 AM / 2:30 AM IST</span>}
           </div>
         </div>
         {!marketLoading && !market?.isOpen && (
@@ -238,16 +235,11 @@ function DashboardPage() {
             message={marketMessage}
           />
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-1">
           <Metric
             label="Cash balance"
             value={`$${cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
           />
-          <Metric
-            label="Portfolio value"
-            value={`$${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-          />
-          <Metric label="Day P&L" value="—" />
         </div>
       </main>
       {quote && market?.isOpen && (
@@ -275,7 +267,6 @@ function StockInfo({
   isMarketOpen: boolean;
   message: string;
 }) {
-  if (!isMarketOpen) return <MarketClosedPanel message={message} className="min-h-[590px]" />;
   if (loading || !quote) return <Skeleton className="h-[590px] rounded-lg" />;
   const formatNum = (n: number) => {
     if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
@@ -343,13 +334,15 @@ function StockInfo({
       <div className="mt-auto grid grid-cols-2 gap-3 pt-8">
         <Button
           onClick={() => onTrade("BUY")}
-          className="h-11 bg-profit text-profit-foreground hover:bg-profit/90"
+          disabled={!isMarketOpen}
+          className="h-11 bg-profit text-profit-foreground hover:bg-profit/90 disabled:opacity-50"
         >
           Buy
         </Button>
         <Button
           onClick={() => onTrade("SELL")}
-          className="h-11 bg-loss text-loss-foreground hover:bg-loss/90"
+          disabled={!isMarketOpen}
+          className="h-11 bg-loss text-loss-foreground hover:bg-loss/90 disabled:opacity-50"
         >
           Sell
         </Button>
@@ -375,7 +368,7 @@ function ChartPanel({
   isMarketOpen: boolean;
   message: string;
 }) {
-  if (!isMarketOpen) return <MarketClosedPanel message={message} className="min-h-[590px]" />;
+
   return (
     <section className="panel min-w-0 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -452,20 +445,7 @@ function ChartPanel({
   );
 }
 
-function MarketClosedPanel({ message, className = "" }: { message: string; className?: string }) {
-  return (
-    <section className={`panel grid place-items-center p-6 text-center ${className}`}>
-      <div className="max-w-sm">
-        <Clock3 className="mx-auto size-8 text-loss" />
-        <h2 className="mt-3 font-semibold">Market closed</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
-        <p className="mt-4 text-xs text-muted-foreground">
-          Live quotes and paper trading resume during the next regular US market session.
-        </p>
-      </div>
-    </section>
-  );
-}
+
 
 // Watchlist — uses a hardcoded list of popular symbols and fetches live quotes
 const WATCHLIST_SYMBOLS = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"];
@@ -486,7 +466,6 @@ function Watchlist({
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
 
   useEffect(() => {
-    if (!isMarketOpen) return;
     WATCHLIST_SYMBOLS.forEach((sym) => {
       stockApi
         .getQuote(sym)
@@ -495,9 +474,9 @@ function Watchlist({
           /* ignore individual failures */
         });
     });
-  }, [isMarketOpen]);
+  }, []);
 
-  if (!isMarketOpen) return <MarketClosedPanel message={message} />;
+
 
   return (
     <section className="panel overflow-hidden">
