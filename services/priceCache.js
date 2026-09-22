@@ -3,27 +3,35 @@
  *
  * The Alpaca WebSocket stream pushes price updates into this cache.
  * All services read from here for the freshest available price.
+ * Emits "update" events so SSE endpoints can push to clients instantly.
  *
  * Structure: { symbol: { price, timestamp, source } }
  */
 
+const { EventEmitter } = require("events");
+
 const cache = new Map();
+const priceEmitter = new EventEmitter();
+priceEmitter.setMaxListeners(500); // Support many concurrent SSE clients
 
 /** Maximum age (ms) before a cached price is considered stale. */
 const MAX_AGE_MS = 30_000; // 30 seconds
 
 /**
  * Update the cached price for a symbol.
+ * Emits an "update" event so SSE listeners can push instantly.
  * @param {string} symbol - Stock ticker (uppercase)
  * @param {number} price - Latest price
  * @param {string} [source="websocket"] - Where this price came from
  */
 const setPrice = (symbol, price, source = "websocket") => {
-  cache.set(symbol.toUpperCase(), {
+  const sym = symbol.toUpperCase();
+  cache.set(sym, {
     price,
     timestamp: Date.now(),
     source,
   });
+  priceEmitter.emit("update", { symbol: sym, price, source });
 };
 
 /**
@@ -108,5 +116,6 @@ module.exports = {
   removePrice,
   clearAll,
   size,
+  priceEmitter,
   MAX_AGE_MS,
 };

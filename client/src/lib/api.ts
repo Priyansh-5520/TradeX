@@ -6,6 +6,14 @@
 // are deployed on different origins.
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
+/**
+ * Build a URL for the SSE price stream endpoint.
+ * Usage: new EventSource(getStreamUrl(["AAPL", "TSLA"]))
+ */
+export function getStreamUrl(symbols: string[]): string {
+  return `${API_BASE}/stream/prices?symbols=${symbols.map((s) => s.toUpperCase()).join(",")}`;
+}
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("tradex_token");

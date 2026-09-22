@@ -9,6 +9,7 @@ const tradeRoutes = require("./routes/tradeRoutes");
 const holdingRoutes = require("./routes/holdingRoutes");
 const userRoutes = require("./routes/userRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
+const streamRoutes = require("./routes/streamRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { startDailySnapshotJob } = require("./services/analysisService");
 const alpacaStream = require("./services/alpacaStream");
@@ -29,6 +30,7 @@ app.use("/api/trade", tradeRoutes);
 app.use("/api/holdings", holdingRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/transactions", transactionRoutes);
+app.use("/api/stream", streamRoutes);
 
 app.get("/api/market/status", async (req, res, next) => {
   try {

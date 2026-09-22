@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Activity, Clock3, Lock, TrendingDown, TrendingUp } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -30,6 +30,7 @@ import {
   holdingApi,
   userApi,
   marketApi,
+  getStreamUrl,
   type MarketStatus,
   type QuoteData,
 } from "@/lib/api";
@@ -156,6 +157,21 @@ function DashboardPage() {
       fetchChart(symbol, period)
     ]).finally(() => setLoading(false));
   }, [user, symbol, period, marketLoading, fetchQuote, fetchChart, fetchUserStats]);
+
+  // ── SSE: Real-time price stream (replaces polling) ──
+  useEffect(() => {
+    if (!user || !market?.isOpen || marketLoading) return;
+    const es = new EventSource(getStreamUrl([symbol]));
+    es.onmessage = (event) => {
+      try {
+        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        if (tick.symbol === symbol.toUpperCase()) {
+          setQuote((prev) => prev ? { ...prev, price: tick.price, priceSource: "websocket-sse" } : prev);
+        }
+      } catch { /* ignore parse errors */ }
+    };
+    return () => es.close();
+  }, [user, symbol, market?.isOpen, marketLoading]);
 
   const choose = (sym: string) => {
     setLoading(true);
@@ -465,16 +481,32 @@ function Watchlist({
 }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
 
+  // Initial load of watchlist quotes
   useEffect(() => {
     WATCHLIST_SYMBOLS.forEach((sym) => {
       stockApi
         .getQuote(sym)
         .then((res) => setQuotes((prev) => ({ ...prev, [sym]: res.data })))
-        .catch(() => {
-          /* ignore individual failures */
-        });
+        .catch(() => { /* ignore */ });
     });
   }, []);
+
+  // SSE: Stream live prices for the entire watchlist
+  useEffect(() => {
+    if (!isMarketOpen) return;
+    const es = new EventSource(getStreamUrl(WATCHLIST_SYMBOLS));
+    es.onmessage = (event) => {
+      try {
+        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        setQuotes((prev) => {
+          const existing = prev[tick.symbol];
+          if (!existing) return prev;
+          return { ...prev, [tick.symbol]: { ...existing, price: tick.price, priceSource: "websocket-sse" } };
+        });
+      } catch { /* ignore */ }
+    };
+    return () => es.close();
+  }, [isMarketOpen]);
 
 
 

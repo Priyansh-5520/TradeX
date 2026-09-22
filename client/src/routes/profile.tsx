@@ -5,24 +5,31 @@ import {
   CalendarDays,
   ChevronDown,
   CircleDollarSign,
+  Clock3,
+  Lock,
   Wallet,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
   Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
+import { toast } from "sonner";
 import { TradeXLogo } from "@/components/tradex-logo";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -36,6 +43,8 @@ import {
   userApi,
   holdingApi,
   transactionApi,
+  tradeApi,
+  getStreamUrl,
   type HoldingData,
   type TransactionData,
 } from "@/lib/api";
@@ -79,13 +88,14 @@ function ProfilePage() {
   const [symbol, setSymbol] = useState("ALL");
   const [sortAsc, setSortAsc] = useState(false);
   const [memberSince, setMemberSince] = useState("");
+  const [sellHolding, setSellHolding] = useState<HoldingData | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/auth" });
   }, [authLoading, user, navigate]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       // Fetch user profile
       const profileRes = await userApi.getProfile();
@@ -107,13 +117,40 @@ function ProfilePage() {
     } catch (err) {
       console.error("Profile data error:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (user) fetchData();
   }, [user, fetchData]);
+
+  // ── SSE: Stream live prices for holdings to update P&L in real-time ──
+  useEffect(() => {
+    if (holdings.length === 0) return;
+    const symbols = holdings.map((h) => h.symbol);
+    const es = new EventSource(getStreamUrl(symbols));
+    es.onmessage = (event) => {
+      try {
+        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        setHoldings((prev) =>
+          prev.map((h) => {
+            if (h.symbol !== tick.symbol) return h;
+            const newProfit = (tick.price - h.averageCost) * h.quantity;
+            const newPct = h.averageCost > 0 ? ((tick.price - h.averageCost) / h.averageCost) * 100 : 0;
+            return {
+              ...h,
+              currentPrice: tick.price,
+              currentValue: tick.price * h.quantity,
+              profit: newProfit,
+              profitPercentage: newPct,
+            };
+          }),
+        );
+      } catch { /* ignore */ }
+    };
+    return () => es.close();
+  }, [holdings.length]); // Re-open only when the number of holdings changes
 
   const portfolioValue = useMemo(
     () => holdings.reduce((sum, h) => sum + h.currentPrice * h.quantity, 0) + cash,
@@ -234,10 +271,10 @@ function ProfilePage() {
               <h2 className="mt-1 text-xl font-semibold">Your holdings</h2>
             </div>
             <div className="panel overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead className="border-b border-border bg-secondary/30 text-left text-xs uppercase text-muted-foreground">
                   <tr>
-                    {["Symbol", "Quantity", "Avg. buy price", "Current price", "P&L", "Change"].map(
+                    {["Symbol", "Quantity", "Avg. buy price", "Current price", "P&L", "Change", "Action"].map(
                       (h) => (
                         <th key={h} className="px-5 py-3 font-medium">
                           {h}
@@ -266,6 +303,15 @@ function ProfilePage() {
                         >
                           {pct >= 0 ? "+" : ""}
                           {pct.toFixed(2)}%
+                        </td>
+                        <td className="px-5">
+                          <Button
+                            size="sm"
+                            onClick={() => setSellHolding(item)}
+                            className="h-8 bg-loss text-loss-foreground hover:bg-loss/90"
+                          >
+                            Sell
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -415,6 +461,16 @@ function ProfilePage() {
           )}
         </section>
       </main>
+      {sellHolding && (
+        <SellDialog
+          holding={sellHolding}
+          onClose={() => setSellHolding(null)}
+          onSuccess={() => {
+            setSellHolding(null);
+            fetchData(true);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -443,5 +499,174 @@ function Summary({
       </p>
       {caption && <p className="mt-1 text-xs text-profit">{caption}</p>}
     </div>
+  );
+}
+
+function SellDialog({
+  holding,
+  onClose,
+  onSuccess,
+}: {
+  holding: HoldingData;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [quantity, setQuantity] = useState(holding.quantity);
+  const [countdown, setCountdown] = useState(0);
+  const [quoteId, setQuoteId] = useState<string | null>(null);
+  const [lockedPrice, setLockedPrice] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const locked = countdown > 0;
+
+  // Countdown timer for locked quotes
+  useEffect(() => {
+    if (!countdown) return;
+    const timer = window.setInterval(
+      () =>
+        setCountdown((v) => {
+          if (v <= 1) {
+            setQuoteId(null);
+            setLockedPrice(null);
+          }
+          return Math.max(0, v - 1);
+        }),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [countdown]);
+
+  const displayPrice = lockedPrice ?? holding.currentPrice;
+  const total = useMemo(() => displayPrice * Math.max(0, quantity), [displayPrice, quantity]);
+
+  const handleLock = async () => {
+    try {
+      const res = await tradeApi.lockQuote(holding.symbol);
+      setQuoteId(res.data.quoteId);
+      setLockedPrice(res.data.price);
+      setCountdown(10);
+      toast.success("Price locked!", {
+        description: `$${res.data.price.toFixed(2)} for 10 seconds`,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to lock price";
+      toast.error(message);
+    }
+  };
+
+  const handleSellAll = () => {
+    setQuantity(holding.quantity);
+  };
+
+  const confirm = async () => {
+    if (quantity < 1 || quantity > holding.quantity) {
+      toast.error("Invalid quantity", {
+        description: `You can sell between 1 and ${holding.quantity} shares.`,
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const opts = quoteId ? { quoteId } : { expectedPrice: holding.currentPrice };
+      await tradeApi.sell(holding.symbol, quantity, opts);
+      toast.success("Sale completed!", {
+        description: `${quantity} ${holding.symbol} at $${displayPrice.toFixed(2)} · ${locked ? "Locked quote" : "Market price"}`,
+      });
+      onSuccess();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Sell failed";
+      toast.error("Sell failed", { description: message });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="border-border bg-popover sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl">Sell {holding.symbol}</DialogTitle>
+          <DialogDescription>
+            You own {holding.quantity} shares · Avg. cost ${holding.averageCost.toFixed(2)}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 py-2">
+          <div className="rounded-md border border-border bg-secondary/40 p-4">
+            <div className="flex justify-between">
+              <span className="text-sm text-muted-foreground">
+                {locked ? "Locked price" : "Current price"}
+              </span>
+              <b className="tabular-nums">${displayPrice.toFixed(2)}</b>
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label htmlFor="sell-quantity" className="text-sm font-medium">
+                Quantity
+              </label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSellAll}
+                className="h-7 border-loss/30 px-3 text-xs text-loss hover:bg-loss/10"
+              >
+                Sell All ({holding.quantity})
+              </Button>
+            </div>
+            <Input
+              id="sell-quantity"
+              type="number"
+              min="1"
+              max={holding.quantity}
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, Math.min(holding.quantity, Number(e.target.value))))}
+              className="h-11"
+            />
+          </div>
+          <div className="flex items-end justify-between border-y border-border py-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Estimated proceeds</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">
+                $
+                {total.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {locked ? "Locked quote" : "Market price"}
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            onClick={handleLock}
+            disabled={locked}
+            className="h-11 w-full border-primary/30 text-primary hover:bg-primary/10"
+          >
+            {locked ? (
+              <>
+                <Clock3 />
+                Locked for {countdown}s
+              </>
+            ) : (
+              <>
+                <Lock />
+                Lock price for 10 seconds
+              </>
+            )}
+          </Button>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={confirm}
+            disabled={quantity < 1 || quantity > holding.quantity || submitting}
+            className="h-11 w-full bg-loss text-loss-foreground hover:bg-loss/90"
+          >
+            {submitting ? "Processing..." : `Confirm Sell · ${quantity} share${quantity > 1 ? "s" : ""}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
