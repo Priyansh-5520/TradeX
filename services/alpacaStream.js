@@ -15,6 +15,9 @@ let stockStream = null;
 let subscribedSymbols = new Set();
 let isConnected = false;
 let reconnectTimer = null;
+let isReconnecting = false;
+let reconnectDelay = 5_000;
+const MAX_RECONNECT_DELAY = 60_000;
 
 /**
  * Initialize the Alpaca client.
@@ -63,6 +66,8 @@ const connect = (initialSymbols = []) => {
     // Handle connection
     stockStream.onConnect(() => {
       isConnected = true;
+      isReconnecting = false;
+      reconnectDelay = 5_000;
       console.log("✅ Alpaca WebSocket connected — real-time data streaming");
 
       // Subscribe to initial symbols
@@ -88,7 +93,6 @@ const connect = (initialSymbols = []) => {
     console.log("🔌 Connecting to Alpaca real-time stream...");
   } catch (error) {
     console.error("❌ Failed to initialize Alpaca stream:", error.message);
-    scheduleReconnect();
   }
 };
 
@@ -96,13 +100,15 @@ const connect = (initialSymbols = []) => {
  * Schedule a reconnection attempt with exponential backoff.
  */
 const scheduleReconnect = () => {
-  if (reconnectTimer) return;
-
-  const delay = 5000; // 5 seconds
+  if (isReconnecting || reconnectTimer) return;
+  isReconnecting = true;
+  const delay = reconnectDelay;
+  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
   console.log(`🔄 Reconnecting to Alpaca in ${delay / 1000}s...`);
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    isReconnecting = false;
     connect(Array.from(subscribedSymbols));
   }, delay);
 };
@@ -114,7 +120,7 @@ const scheduleReconnect = () => {
 const subscribe = (symbols) => {
   if (!symbols || symbols.length === 0) return;
 
-  const upperSymbols = symbols.map((s) => s.toUpperCase());
+  const upperSymbols = symbols.map((s) => s.toUpperCase()).filter((s) => !/\.(NS|BO)$/.test(s));
   const newSymbols = upperSymbols.filter((s) => !subscribedSymbols.has(s));
 
   if (newSymbols.length === 0) return;
@@ -162,6 +168,7 @@ const disconnect = () => {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  isReconnecting = false;
 
   if (stockStream) {
     try {

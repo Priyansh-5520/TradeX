@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, Clock3, Lock, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, Clock3, Lock, TrendingDown, TrendingUp, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
 import {
   stockApi,
+  watchlistApi,
   tradeApi,
   holdingApi,
   userApi,
@@ -78,6 +79,13 @@ function DashboardPage() {
   const [portfolioValue, setPortfolioValue] = useState(0);
   const [market, setMarket] = useState<MarketStatus | null>(null);
   const [marketLoading, setMarketLoading] = useState(true);
+  const [watchSymbols, setWatchSymbols] = useState<string[]>([]);
+  const isIndianSymbol =
+    /\.(NS|BO)$/i.test(symbol) || ["^NSEI", "^BSESN", "^NSEBANK"].includes(symbol.toUpperCase());
+  const isIndex = symbol.startsWith("^");
+  const selectedMarketOpen = isIndianSymbol
+    ? Boolean(market?.indian?.isOpen)
+    : Boolean(market?.isOpen);
 
   // Redirect to auth if not logged in
   useEffect(() => {
@@ -147,31 +155,60 @@ function DashboardPage() {
     return () => window.clearInterval(timer);
   }, [user, fetchMarketStatus]);
 
+  useEffect(() => {
+    if (!user) return;
+    watchlistApi
+      .getAll()
+      .then((res) => setWatchSymbols(res.data))
+      .catch(() => {});
+  }, [user]);
+
+  const addToWatchlist = async () => {
+    try {
+      const res = await watchlistApi.add(symbol);
+      setWatchSymbols(res.data);
+      toast.success(`${symbol} added to watchlist`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not add to watchlist");
+    }
+  };
+
+  const updateWatchlist = (symbols: string[]) => setWatchSymbols(symbols);
+
   // Fetch quote data regardless of whether the market is open so users can see closing prices.
   useEffect(() => {
     if (!user || marketLoading) return;
     setLoading(true);
-    Promise.all([
-      fetchUserStats(),
-      fetchQuote(symbol),
-      fetchChart(symbol, period)
-    ]).finally(() => setLoading(false));
+    Promise.all([fetchUserStats(), fetchQuote(symbol), fetchChart(symbol, period)]).finally(() =>
+      setLoading(false),
+    );
   }, [user, symbol, period, marketLoading, fetchQuote, fetchChart, fetchUserStats]);
 
   // ── SSE: Real-time price stream (replaces polling) ──
   useEffect(() => {
-    if (!user || !market?.isOpen || marketLoading) return;
+    if (!user || !selectedMarketOpen || marketLoading) return;
     const es = new EventSource(getStreamUrl([symbol]));
     es.onmessage = (event) => {
       try {
-        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        const tick = JSON.parse(event.data) as { symbol: string; price: number; priceUSD: number };
         if (tick.symbol === symbol.toUpperCase()) {
-          setQuote((prev) => prev ? { ...prev, price: tick.price, priceSource: "websocket-sse" } : prev);
+          setQuote((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  price: tick.price,
+                  priceUSD: tick.priceUSD,
+                  priceSource: "websocket-sse",
+                }
+              : prev,
+          );
         }
-      } catch { /* ignore parse errors */ }
+      } catch {
+        /* ignore parse errors */
+      }
     };
     return () => es.close();
-  }, [user, symbol, market?.isOpen, marketLoading]);
+  }, [user, symbol, selectedMarketOpen, marketLoading]);
 
   const choose = (sym: string) => {
     setLoading(true);
@@ -188,7 +225,9 @@ function DashboardPage() {
       })
     : null;
   const marketMessage = market
-    ? `US market is closed. ${nextOpen ? `Next regular session: ${nextOpen}.` : ""}`
+    ? isIndianSymbol
+      ? "Indian market is closed. NSE/BSE trading is available Monday–Friday, 09:15–15:30 IST."
+      : `US market is closed. ${nextOpen ? `Next regular session: ${nextOpen}.` : ""}`
     : "Market status is temporarily unavailable.";
 
   if (authLoading)
@@ -205,23 +244,29 @@ function DashboardPage() {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-              US Markets
+              {isIndianSymbol ? "Indian Markets" : "US Markets"}
             </p>
             <h1 className="mt-1 text-xl font-semibold">Trading dashboard</h1>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span
-              className={`size-2 rounded-full ${market?.isOpen ? "animate-pulse bg-profit" : "bg-loss"}`}
+              className={`size-2 rounded-full ${selectedMarketOpen ? "animate-pulse bg-profit" : "bg-loss"}`}
             />
-            {market?.isOpen
-              ? "Market open"
+            {selectedMarketOpen
+              ? isIndianSymbol
+                ? "NSE/BSE open"
+                : "Market open"
               : marketLoading
                 ? "Checking market status…"
                 : "Market closed"}
-            {market?.isOpen && <span className="hidden sm:inline">• Closes 1:30 AM / 2:30 AM IST</span>}
+            {selectedMarketOpen && (
+              <span className="hidden sm:inline">
+                • {isIndianSymbol ? "Closes 3:30 PM IST" : "Closes 1:30 AM / 2:30 AM IST"}
+              </span>
+            )}
           </div>
         </div>
-        {!marketLoading && !market?.isOpen && (
+        {!marketLoading && !selectedMarketOpen && (
           <div className="mb-4 rounded-md border border-loss/30 bg-loss/10 px-4 py-3 text-sm text-loss">
             {marketMessage}
           </div>
@@ -231,8 +276,11 @@ function DashboardPage() {
             quote={quote}
             loading={loading}
             onTrade={setSide}
-            isMarketOpen={Boolean(market?.isOpen)}
+            isMarketOpen={selectedMarketOpen}
             message={marketMessage}
+            inWatchlist={watchSymbols.includes(symbol)}
+            onAddToWatchlist={addToWatchlist}
+            isIndex={isIndex}
           />
           <ChartPanel
             quote={quote}
@@ -240,15 +288,17 @@ function DashboardPage() {
             period={period}
             setPeriod={setPeriod}
             loading={loading}
-            isMarketOpen={Boolean(market?.isOpen)}
+            isMarketOpen={selectedMarketOpen}
             message={marketMessage}
           />
           <Watchlist
             selected={symbol}
             onSelect={choose}
             loading={loading}
-            isMarketOpen={Boolean(market?.isOpen)}
+            isMarketOpen={selectedMarketOpen}
             message={marketMessage}
+            symbols={watchSymbols}
+            onSymbolsChange={updateWatchlist}
           />
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-1">
@@ -258,7 +308,7 @@ function DashboardPage() {
           />
         </div>
       </main>
-      {quote && market?.isOpen && (
+      {quote && selectedMarketOpen && (
         <TradeDialog
           quote={quote}
           side={side}
@@ -276,12 +326,18 @@ function StockInfo({
   onTrade,
   isMarketOpen,
   message,
+  inWatchlist,
+  onAddToWatchlist,
+  isIndex,
 }: {
   quote: QuoteData | null;
   loading: boolean;
   onTrade: (side: "BUY" | "SELL") => void;
   isMarketOpen: boolean;
   message: string;
+  inWatchlist: boolean;
+  onAddToWatchlist: () => void;
+  isIndex: boolean;
 }) {
   if (loading || !quote) return <Skeleton className="h-[590px] rounded-lg" />;
   const formatNum = (n: number) => {
@@ -324,7 +380,14 @@ function StockInfo({
         </div>
       </div>
       <div className="mt-8">
-        <p className="text-4xl font-bold tabular-nums">${quote.price?.toFixed(2)}</p>
+        <p className="text-4xl font-bold tabular-nums">
+          {quote.currency === "INR" ? `₹${quote.price.toFixed(2)}` : `$${quote.price.toFixed(2)}`}
+        </p>
+        {quote.currency === "INR" && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            USD equivalent: ${quote.priceUSD.toFixed(2)}
+          </p>
+        )}
         <p
           className={`mt-2 flex items-center gap-1 text-sm font-semibold ${(quote.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}
         >
@@ -347,17 +410,25 @@ function StockInfo({
           </div>
         ))}
       </dl>
-      <div className="mt-auto grid grid-cols-2 gap-3 pt-8">
+      <Button
+        variant="outline"
+        onClick={onAddToWatchlist}
+        disabled={inWatchlist}
+        className="mt-auto h-10 w-full border-primary/30 text-primary"
+      >
+        {inWatchlist ? "In watchlist" : "Add to watchlist"}
+      </Button>
+      <div className="grid grid-cols-2 gap-3 pt-3">
         <Button
           onClick={() => onTrade("BUY")}
-          disabled={!isMarketOpen}
+          disabled={!isMarketOpen || isIndex}
           className="h-11 bg-profit text-profit-foreground hover:bg-profit/90 disabled:opacity-50"
         >
-          Buy
+          {isIndex ? "Index (view only)" : "Buy"}
         </Button>
         <Button
           onClick={() => onTrade("SELL")}
-          disabled={!isMarketOpen}
+          disabled={!isMarketOpen || isIndex}
           className="h-11 bg-loss text-loss-foreground hover:bg-loss/90 disabled:opacity-50"
         >
           Sell
@@ -384,7 +455,6 @@ function ChartPanel({
   isMarketOpen: boolean;
   message: string;
 }) {
-
   return (
     <section className="panel min-w-0 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -461,65 +531,108 @@ function ChartPanel({
   );
 }
 
-
-
-// Watchlist — uses a hardcoded list of popular symbols and fetches live quotes
-const WATCHLIST_SYMBOLS = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"];
-
 function Watchlist({
   selected,
   onSelect,
   loading,
   isMarketOpen,
   message,
+  symbols,
+  onSymbolsChange,
 }: {
   selected: string;
   onSelect: (sym: string) => void;
   loading: boolean;
   isMarketOpen: boolean;
   message: string;
+  symbols: string[];
+  onSymbolsChange: (symbols: string[]) => void;
 }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
+  const [draggedSymbol, setDraggedSymbol] = useState<string | null>(null);
 
-  // Initial load of watchlist quotes
-  useEffect(() => {
-    WATCHLIST_SYMBOLS.forEach((sym) => {
+  const refreshQuotes = useCallback((items: string[]) => {
+    items.forEach((sym) => {
       stockApi
         .getQuote(sym)
         .then((res) => setQuotes((prev) => ({ ...prev, [sym]: res.data })))
-        .catch(() => { /* ignore */ });
+        .catch(() => {});
     });
   }, []);
+
+  useEffect(() => {
+    refreshQuotes(symbols);
+    if (!isMarketOpen) return;
+    const timer = window.setInterval(() => refreshQuotes(symbols), 15_000);
+    return () => window.clearInterval(timer);
+  }, [symbols, isMarketOpen, refreshQuotes]);
 
   // SSE: Stream live prices for the entire watchlist
   useEffect(() => {
     if (!isMarketOpen) return;
-    const es = new EventSource(getStreamUrl(WATCHLIST_SYMBOLS));
+    const es = new EventSource(getStreamUrl(symbols));
     es.onmessage = (event) => {
       try {
-        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        const tick = JSON.parse(event.data) as { symbol: string; price: number; priceUSD: number };
         setQuotes((prev) => {
           const existing = prev[tick.symbol];
           if (!existing) return prev;
-          return { ...prev, [tick.symbol]: { ...existing, price: tick.price, priceSource: "websocket-sse" } };
+          return {
+            ...prev,
+            [tick.symbol]: {
+              ...existing,
+              price: tick.price,
+              priceUSD: tick.priceUSD,
+              priceSource: "websocket-sse",
+            },
+          };
         });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
     return () => es.close();
-  }, [isMarketOpen]);
+  }, [isMarketOpen, symbols]);
 
+  const removeSymbol = async (symbol: string) => {
+    try {
+      const res = await watchlistApi.remove(symbol);
+      onSymbolsChange(res.data);
+      setQuotes((prev) => {
+        const next = { ...prev };
+        delete next[symbol];
+        return next;
+      });
+    } catch {
+      toast.error("Could not remove symbol");
+    }
+  };
 
+  const reorderSymbols = async (from: string, to: string) => {
+    if (from === to) return;
+    const next = symbols.filter((symbol) => symbol !== from);
+    const target = next.indexOf(to);
+    if (target < 0) return;
+    next.splice(target, 0, from);
+    onSymbolsChange(next);
+    try {
+      onSymbolsChange((await watchlistApi.reorder(next)).data);
+    } catch (error) {
+      onSymbolsChange(symbols);
+      toast.error(error instanceof Error ? error.message : "Could not reorder watchlist");
+    }
+  };
 
   return (
     <section className="panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-border p-5">
         <div>
           <h2 className="font-semibold">Watchlist</h2>
-          <p className="text-xs text-muted-foreground">{WATCHLIST_SYMBOLS.length} instruments</p>
+          <p className="text-xs text-muted-foreground">{symbols.length} instruments</p>
         </div>
       </div>
       <div className="divide-y divide-border">
-        {WATCHLIST_SYMBOLS.map((sym) => {
+        {symbols.map((sym) => {
           const q = quotes[sym];
           if (loading && !q)
             return (
@@ -530,8 +643,20 @@ function Watchlist({
           return (
             <button
               key={sym}
+              draggable
+              onDragStart={(event) => {
+                setDraggedSymbol(sym);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (draggedSymbol) reorderSymbols(draggedSymbol, sym);
+                setDraggedSymbol(null);
+              }}
+              onDragEnd={() => setDraggedSymbol(null)}
               onClick={() => onSelect(sym)}
-              className={`flex w-full items-center justify-between gap-2 p-4 text-left transition-colors hover:bg-accent/60 ${selected === sym ? "bg-primary/7" : ""}`}
+              className={`flex w-full cursor-grab items-center justify-between gap-2 p-4 text-left transition-colors hover:bg-accent/60 active:cursor-grabbing ${selected === sym ? "bg-primary/7" : ""} ${draggedSymbol === sym ? "opacity-40" : ""}`}
             >
               <div>
                 <p className="text-sm font-bold">{sym}</p>
@@ -540,7 +665,11 @@ function Watchlist({
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-semibold tabular-nums">${q?.price?.toFixed(2) ?? "—"}</p>
+                <p className="text-sm font-semibold tabular-nums">
+                  {q?.currency === "INR"
+                    ? `₹${q.price.toFixed(2)}`
+                    : `$${q?.price?.toFixed(2) ?? "—"}`}
+                </p>
                 <p
                   className={`text-xs ${(q?.changePercent ?? 0) >= 0 ? "text-profit" : "text-loss"}`}
                 >
@@ -548,6 +677,18 @@ function Watchlist({
                   {q?.changePercent?.toFixed(2) ?? "0.00"}%
                 </p>
               </div>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeSymbol(sym);
+                }}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label={`Remove ${sym}`}
+              >
+                <X className="size-3" />
+              </span>
             </button>
           );
         })}
@@ -591,7 +732,7 @@ function TradeDialog({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [quantity, setQuantity] = useState(1);
+  const [quantityInput, setQuantityInput] = useState("1");
   const [countdown, setCountdown] = useState(0);
   const [quoteId, setQuoteId] = useState<string | null>(null);
   const [lockedPrice, setLockedPrice] = useState<number | null>(null);
@@ -601,7 +742,7 @@ function TradeDialog({
   useEffect(() => {
     if (!side) {
       setCountdown(0);
-      setQuantity(1);
+      setQuantityInput("1");
       setQuoteId(null);
       setLockedPrice(null);
     }
@@ -622,8 +763,13 @@ function TradeDialog({
     return () => window.clearInterval(timer);
   }, [countdown]);
 
-  const displayPrice = lockedPrice ?? quote.price;
-  const total = useMemo(() => displayPrice * Math.max(0, quantity), [displayPrice, quantity]);
+  const quantity = Number(quantityInput);
+  const validQuantity = Number.isInteger(quantity) && quantity > 0;
+  const displayPrice = lockedPrice ?? quote.priceUSD;
+  const total = useMemo(
+    () => displayPrice * (validQuantity ? quantity : 0),
+    [displayPrice, quantity, validQuantity],
+  );
 
   const handleLock = async () => {
     try {
@@ -641,9 +787,13 @@ function TradeDialog({
   };
 
   const confirm = async () => {
+    if (!validQuantity) {
+      toast.error("Enter a positive whole number of shares");
+      return;
+    }
     setSubmitting(true);
     try {
-      const opts = quoteId ? { quoteId } : { expectedPrice: quote.price };
+      const opts = quoteId ? { quoteId } : { expectedPrice: quote.priceUSD };
       const fn = side === "BUY" ? tradeApi.buy : tradeApi.sell;
       const res = await fn(quote.symbol, quantity, opts);
       toast.success(`${side === "BUY" ? "Purchase" : "Sale"} completed!`, {
@@ -687,8 +837,8 @@ function TradeDialog({
               id="quantity"
               type="number"
               min="1"
-              value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+              value={quantityInput}
+              onChange={(e) => setQuantityInput(e.target.value)}
               className="h-11"
             />
           </div>
@@ -729,7 +879,7 @@ function TradeDialog({
         <DialogFooter>
           <Button
             onClick={confirm}
-            disabled={quantity < 1 || submitting}
+            disabled={!validQuantity || submitting}
             className={`h-11 w-full ${side === "SELL" ? "bg-loss text-loss-foreground hover:bg-loss/90" : "bg-profit text-profit-foreground hover:bg-profit/90"}`}
           >
             {submitting ? "Processing..." : `Confirm ${side}`}

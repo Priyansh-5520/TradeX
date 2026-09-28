@@ -2,6 +2,7 @@ const tradeService = require("../services/tradeService");
 const stockService = require("../services/stockService");
 const quoteLock = require("../services/quoteLock");
 const alpacaStream = require("../services/alpacaStream");
+const { getIndianMarketStatus } = require("../services/indianMarketService");
 const ApiError = require("../utils/ApiError");
 
 const requireOpenMarket = async () => {
@@ -14,6 +15,19 @@ const requireOpenMarket = async () => {
   }
 };
 
+const requireOpenMarketForSymbol = async (symbol) => {
+  if (["^NSEI", "^BSESN", "^NSEBANK"].includes(String(symbol).toUpperCase())) {
+    throw ApiError.badRequest("Market indices such as NIFTY 50 are view-only and cannot be traded.");
+  }
+  if (/\.(NS|BO)$/i.test(symbol)) {
+    if (!getIndianMarketStatus().isOpen) {
+      throw ApiError.badRequest("The Indian stock market is closed. NSE/BSE trading is available Monday–Friday, 09:15–15:30 IST.");
+    }
+    return;
+  }
+  await requireOpenMarket();
+};
+
 /**
  * POST /api/trade/lock-quote
  * Body: { symbol: string }
@@ -23,15 +37,16 @@ const requireOpenMarket = async () => {
  */
 const lockQuote = async (req, res, next) => {
   try {
-    await requireOpenMarket();
     const { symbol } = req.body;
 
     if (!symbol) {
       throw ApiError.badRequest("Symbol is required");
     }
+    await requireOpenMarketForSymbol(symbol);
 
-    // Get the current live price
-    const price = await stockService.getLivePrice(symbol);
+    // Lock the USD execution price; quote.price may be INR for NSE/BSE.
+    const quote = await stockService.getQuote(symbol);
+    const price = quote.priceUSD;
     const priceInfo = stockService.getPriceInfo(symbol);
 
     // Create a lock for this user
@@ -41,6 +56,8 @@ const lockQuote = async (req, res, next) => {
       success: true,
       data: {
         ...lock,
+        currency: quote.currency,
+        priceINR: quote.priceINR,
         priceSource: priceInfo?.source || "unknown",
       },
     });
@@ -55,12 +72,12 @@ const lockQuote = async (req, res, next) => {
  */
 const buyStock = async (req, res, next) => {
   try {
-    await requireOpenMarket();
     const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {
       throw ApiError.badRequest("Symbol and quantity are required");
     }
+    await requireOpenMarketForSymbol(symbol);
 
     // Convert quantity to number
     const qty = Number(quantity);
@@ -86,12 +103,12 @@ const buyStock = async (req, res, next) => {
  */
 const sellStock = async (req, res, next) => {
   try {
-    await requireOpenMarket();
     const { symbol, quantity, quoteId, expectedPrice } = req.body;
     
     if (!symbol || !quantity) {
       throw ApiError.badRequest("Symbol and quantity are required");
     }
+    await requireOpenMarketForSymbol(symbol);
 
     const qty = Number(quantity);
     if (isNaN(qty)) throw ApiError.badRequest("Quantity must be a valid number");

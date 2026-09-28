@@ -20,7 +20,15 @@ export function AppHeader({ onSelect }: { onSelect?: (symbol: string) => void })
     setSearching(true);
     try {
       const res = await stockApi.search(q);
-      setResults(res.data.slice(0, 8));
+      const apiResults = res.data ?? [];
+      // Keep the benchmark easy to find when Yahoo ranks related NIFTY ETFs
+      // before the index (or an older API process is still running).
+      const isNifty50Search = /nifty\s*50/i.test(q);
+      const hasNifty50 = apiResults.some((item) => item.symbol === "^NSEI");
+      const results = isNifty50Search && !hasNifty50
+        ? [{ symbol: "^NSEI", name: "NIFTY 50", exchange: "NSE", type: "Index" }, ...apiResults]
+        : apiResults;
+      setResults(results.slice(0, 8));
     } catch {
       setResults([]);
     } finally {

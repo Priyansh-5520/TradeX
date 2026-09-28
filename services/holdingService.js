@@ -22,15 +22,17 @@ const getPortfolio = async (userId) => {
   // Fetch live prices concurrently for all held symbols
   const enrichedHoldings = await Promise.all(
     holdings.map(async (holding) => {
-      let livePrice = 0;
+      let quote = null;
       try {
-        livePrice = await stockService.getLivePrice(holding.symbol);
+        quote = await stockService.getQuote(holding.symbol);
       } catch (error) {
         // Fallback or handle error if price fetch fails temporarily
         console.warn(`Could not fetch live price for ${holding.symbol}`);
       }
 
-      const currentValue = livePrice * holding.quantity;
+      const currentPriceUSD = quote?.priceUSD || 0;
+      const currentPrice = quote?.price || 0;
+      const currentValue = currentPriceUSD * holding.quantity;
       const profit = currentValue - holding.investment;
       const profitPercentage = holding.investment > 0 ? (profit / holding.investment) * 100 : 0;
 
@@ -39,8 +41,12 @@ const getPortfolio = async (userId) => {
         symbol: holding.symbol,
         quantity: holding.quantity,
         averageCost: holding.investment / holding.quantity,
+        averageCostUSD: holding.investment / holding.quantity,
         totalInvestment: holding.investment,
-        currentPrice: livePrice,
+        currency: holding.currency || (stockService.isIndianSymbol(holding.symbol) ? "INR" : "USD"),
+        currentPrice,
+        currentPriceUSD,
+        currentPriceINR: quote?.priceINR,
         currentValue,
         profit,
         profitPercentage,

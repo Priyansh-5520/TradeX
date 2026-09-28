@@ -16,6 +16,9 @@ const transactionSchema = new mongoose.Schema(
       type: Number,
       required: [true, "Price is required"],
     },
+    currency: { type: String, enum: ["USD", "INR"], default: "USD" },
+    priceINR: { type: Number },
+    exchangeRate: { type: Number },
     type: {
       type: String,
       required: [true, "Type is required"],

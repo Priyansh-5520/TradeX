@@ -91,6 +91,10 @@ export const marketApi = {
   getStatus: () => request<{ success: boolean; data: MarketStatus }>("/market/status"),
 };
 
+export const fxApi = {
+  getRate: () => request<{ success: boolean; data: ExchangeRate }>("/fx/rate"),
+};
+
 // ─── Trade ───
 export const tradeApi = {
   lockQuote: (symbol: string) =>
@@ -115,6 +119,24 @@ export const tradeApi = {
 // ─── Holdings ───
 export const holdingApi = {
   getPortfolio: () => request<{ success: boolean; data: PortfolioData }>("/holdings"),
+};
+
+export const watchlistApi = {
+  getAll: () => request<{ success: boolean; data: string[] }>("/watchlist"),
+  add: (symbol: string) =>
+    request<{ success: boolean; data: string[] }>("/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    }),
+  remove: (symbol: string) =>
+    request<{ success: boolean; data: string[] }>(`/watchlist/${encodeURIComponent(symbol)}`, {
+      method: "DELETE",
+    }),
+  reorder: (watchlist: string[]) =>
+    request<{ success: boolean; data: string[] }>("/watchlist", {
+      method: "PUT",
+      body: JSON.stringify({ watchlist }),
+    }),
 };
 
 // ─── User ───
@@ -149,6 +171,9 @@ export type QuoteData = {
   symbol: string;
   name: string;
   price: number;
+  priceUSD: number;
+  priceINR?: number;
+  currency?: "USD" | "INR";
   change: number;
   changePercent: number;
   dayHigh: number;
@@ -166,7 +191,10 @@ export type MarketStatus = {
   nextOpen: string;
   nextClose: string;
   source: string;
+  indian?: { isOpen: boolean; session: string };
 };
+
+export type ExchangeRate = { usdToInr: number; inrToUsd: number };
 
 export type SearchResult = {
   symbol: string;
@@ -199,8 +227,12 @@ export type HoldingData = {
   symbol: string;
   quantity: number;
   averageCost: number;
+  averageCostUSD: number;
   totalInvestment: number;
+  currency: "USD" | "INR";
   currentPrice: number;
+  currentPriceUSD: number;
+  currentPriceINR?: number;
   currentValue: number;
   profit: number;
   profitPercentage: number;

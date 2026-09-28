@@ -13,6 +13,9 @@ const express = require("express");
 const router = express.Router();
 const priceCache = require("../services/priceCache");
 const alpacaStream = require("../services/alpacaStream");
+const indianPricePoll = require("../services/indianPricePoll");
+const stockService = require("../services/stockService");
+const fxService = require("../services/fxService");
 
 /**
  * GET /api/stream/prices?symbols=AAPL,TSLA,NVDA
@@ -20,7 +23,7 @@ const alpacaStream = require("../services/alpacaStream");
  * Opens an SSE connection. The server pushes JSON messages whenever a
  * subscribed symbol's price updates in the cache.
  */
-router.get("/prices", (req, res) => {
+router.get("/prices", async (req, res) => {
   const symbolsParam = req.query.symbols;
   if (!symbolsParam) {
     return res.status(400).json({ error: "symbols query parameter is required" });
@@ -50,14 +53,18 @@ router.get("/prices", (req, res) => {
 
   // Ensure Alpaca is streaming these symbols
   alpacaStream.subscribe(Array.from(symbols));
+  indianPricePoll.subscribe(Array.from(symbols));
 
   // Send the current cached prices immediately so the client doesn't start blank
   for (const sym of symbols) {
     const cached = priceCache.getPrice(sym);
     if (cached) {
+      const indian = stockService.isIndianSymbol(sym);
       const payload = JSON.stringify({
         symbol: sym,
         price: cached.price,
+        priceUSD: indian ? cached.price * (await fxService.getInrToUsd()) : cached.price,
+        currency: indian ? "INR" : "USD",
         source: cached.source,
         timestamp: cached.timestamp,
       });
@@ -66,11 +73,14 @@ router.get("/prices", (req, res) => {
   }
 
   // ── Listen for live updates ──
-  const onUpdate = ({ symbol, price, source }) => {
+  const onUpdate = async ({ symbol, price, source }) => {
     if (!symbols.has(symbol)) return;
+    const indian = stockService.isIndianSymbol(symbol);
     const payload = JSON.stringify({
       symbol,
       price,
+      priceUSD: indian ? price * (await fxService.getInrToUsd()) : price,
+      currency: indian ? "INR" : "USD",
       source,
       timestamp: Date.now(),
     });

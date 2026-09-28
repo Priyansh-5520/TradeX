@@ -10,13 +10,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { TradeXLogo } from "@/components/tradex-logo";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -132,28 +126,34 @@ function ProfilePage() {
     const es = new EventSource(getStreamUrl(symbols));
     es.onmessage = (event) => {
       try {
-        const tick = JSON.parse(event.data) as { symbol: string; price: number };
+        const tick = JSON.parse(event.data) as { symbol: string; price: number; priceUSD: number };
         setHoldings((prev) =>
           prev.map((h) => {
             if (h.symbol !== tick.symbol) return h;
-            const newProfit = (tick.price - h.averageCost) * h.quantity;
-            const newPct = h.averageCost > 0 ? ((tick.price - h.averageCost) / h.averageCost) * 100 : 0;
+            const newProfit = (tick.priceUSD - h.averageCostUSD) * h.quantity;
+            const newPct =
+              h.averageCostUSD > 0
+                ? ((tick.priceUSD - h.averageCostUSD) / h.averageCostUSD) * 100
+                : 0;
             return {
               ...h,
               currentPrice: tick.price,
-              currentValue: tick.price * h.quantity,
+              currentPriceUSD: tick.priceUSD,
+              currentValue: tick.priceUSD * h.quantity,
               profit: newProfit,
               profitPercentage: newPct,
             };
           }),
         );
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
     return () => es.close();
   }, [holdings.length]); // Re-open only when the number of holdings changes
 
   const portfolioValue = useMemo(
-    () => holdings.reduce((sum, h) => sum + h.currentPrice * h.quantity, 0) + cash,
+    () => holdings.reduce((sum, h) => sum + h.currentPriceUSD * h.quantity, 0) + cash,
     [holdings, cash],
   );
 
@@ -163,7 +163,7 @@ function ProfilePage() {
     () =>
       holdings.map((h, i) => ({
         name: h.symbol,
-        value: h.currentPrice * h.quantity,
+        value: h.currentPriceUSD * h.quantity,
         color: CHART_COLORS[i % CHART_COLORS.length],
       })),
     [holdings],
@@ -274,13 +274,20 @@ function ProfilePage() {
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="border-b border-border bg-secondary/30 text-left text-xs uppercase text-muted-foreground">
                   <tr>
-                    {["Symbol", "Quantity", "Avg. buy price", "Current price", "P&L", "Change", "Action"].map(
-                      (h) => (
-                        <th key={h} className="px-5 py-3 font-medium">
-                          {h}
-                        </th>
-                      ),
-                    )}
+                    {[
+                      "Symbol",
+                      "Currency",
+                      "Quantity",
+                      "Avg. buy price",
+                      "Current price",
+                      "P&L",
+                      "Change",
+                      "Action",
+                    ].map((h) => (
+                      <th key={h} className="px-5 py-3 font-medium">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -290,9 +297,14 @@ function ProfilePage() {
                     return (
                       <tr key={item.symbol} className="hover:bg-accent/30">
                         <td className="px-5 py-4 font-bold">{item.symbol}</td>
+                        <td className="px-5">{item.currency === "INR" ? "🇮🇳 INR" : "🇺🇸 USD"}</td>
                         <td className="px-5 tabular-nums">{item.quantity}</td>
-                        <td className="px-5 tabular-nums">${item.averageCost.toFixed(2)}</td>
-                        <td className="px-5 tabular-nums">${item.currentPrice.toFixed(2)}</td>
+                        <td className="px-5 tabular-nums">${item.averageCostUSD.toFixed(2)}</td>
+                        <td className="px-5 tabular-nums">
+                          {item.currency === "INR"
+                            ? `₹${item.currentPrice.toFixed(2)} ($${item.currentPriceUSD.toFixed(2)})`
+                            : `$${item.currentPriceUSD.toFixed(2)}`}
+                        </td>
                         <td
                           className={`px-5 font-semibold tabular-nums ${pnl >= 0 ? "text-profit" : "text-loss"}`}
                         >
@@ -535,7 +547,7 @@ function SellDialog({
     return () => window.clearInterval(timer);
   }, [countdown]);
 
-  const displayPrice = lockedPrice ?? holding.currentPrice;
+  const displayPrice = lockedPrice ?? holding.currentPriceUSD;
   const total = useMemo(() => displayPrice * Math.max(0, quantity), [displayPrice, quantity]);
 
   const handleLock = async () => {
@@ -567,7 +579,7 @@ function SellDialog({
 
     setSubmitting(true);
     try {
-      const opts = quoteId ? { quoteId } : { expectedPrice: holding.currentPrice };
+      const opts = quoteId ? { quoteId } : { expectedPrice: holding.currentPriceUSD };
       await tradeApi.sell(holding.symbol, quantity, opts);
       toast.success("Sale completed!", {
         description: `${quantity} ${holding.symbol} at $${displayPrice.toFixed(2)} · ${locked ? "Locked quote" : "Market price"}`,
@@ -587,7 +599,7 @@ function SellDialog({
         <DialogHeader>
           <DialogTitle className="text-xl">Sell {holding.symbol}</DialogTitle>
           <DialogDescription>
-            You own {holding.quantity} shares · Avg. cost ${holding.averageCost.toFixed(2)}
+            You own {holding.quantity} shares · Avg. cost ${holding.averageCostUSD.toFixed(2)}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 py-2">
@@ -619,7 +631,9 @@ function SellDialog({
               min="1"
               max={holding.quantity}
               value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, Math.min(holding.quantity, Number(e.target.value))))}
+              onChange={(e) =>
+                setQuantity(Math.max(1, Math.min(holding.quantity, Number(e.target.value))))
+              }
               className="h-11"
             />
           </div>
@@ -663,7 +677,9 @@ function SellDialog({
             disabled={quantity < 1 || quantity > holding.quantity || submitting}
             className="h-11 w-full bg-loss text-loss-foreground hover:bg-loss/90"
           >
-            {submitting ? "Processing..." : `Confirm Sell · ${quantity} share${quantity > 1 ? "s" : ""}`}
+            {submitting
+              ? "Processing..."
+              : `Confirm Sell · ${quantity} share${quantity > 1 ? "s" : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>

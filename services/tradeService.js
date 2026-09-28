@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Holding = require("../models/Holding");
 const Transaction = require("../models/Transaction");
 const stockService = require("./stockService");
+const fxService = require("./fxService");
 const quoteLock = require("./quoteLock");
 const ApiError = require("../utils/ApiError");
 
@@ -54,7 +55,7 @@ const resolveExecutionPrice = async (userId, symbol, options = {}) => {
 
     // The lock is valid — but verify the locked price hasn't drifted too far
     // from the current market price (protects against extreme events)
-    const currentPrice = await stockService.getLivePrice(symbol);
+    const currentPrice = (await stockService.getQuote(symbol)).priceUSD;
     const slip = checkSlippage(currentPrice, result.lock.price);
 
     if (!slip.within) {
@@ -77,7 +78,7 @@ const resolveExecutionPrice = async (userId, symbol, options = {}) => {
       throw ApiError.badRequest("expectedPrice must be a positive number");
     }
 
-    const currentPrice = await stockService.getLivePrice(symbol);
+    const currentPrice = (await stockService.getQuote(symbol)).priceUSD;
     const slip = checkSlippage(currentPrice, ep);
 
     if (!slip.within) {
@@ -94,7 +95,7 @@ const resolveExecutionPrice = async (userId, symbol, options = {}) => {
   }
 
   // 3. Market order — no protection (backward compatible)
-  const currentPrice = await stockService.getLivePrice(symbol);
+  const currentPrice = (await stockService.getQuote(symbol)).priceUSD;
   return { price: currentPrice, method: "market" };
 };
 
@@ -107,6 +108,8 @@ const buyStock = async (userId, symbol, quantity, options = {}) => {
   // Resolve the execution price (with quote lock / slippage protection)
   const { price, method } = await resolveExecutionPrice(userId, symbol, options);
   const totalCost = price * quantity;
+  const indian = stockService.isIndianSymbol(symbol);
+  const usdToInr = indian ? await fxService.getUsdToInr() : null;
 
   const user = await User.findById(userId);
   if (!user) throw ApiError.notFound("User not found");
@@ -126,6 +129,8 @@ const buyStock = async (userId, symbol, quantity, options = {}) => {
   if (holding) {
     holding.quantity += quantity;
     holding.investment += totalCost;
+    holding.currency = indian ? "INR" : "USD";
+    holding.averageCostUSD = holding.investment / holding.quantity;
     await holding.save();
   } else {
     holding = await Holding.create({
@@ -133,6 +138,8 @@ const buyStock = async (userId, symbol, quantity, options = {}) => {
       symbol,
       quantity,
       investment: totalCost,
+      currency: indian ? "INR" : "USD",
+      averageCostUSD: price,
     });
   }
 
@@ -141,6 +148,9 @@ const buyStock = async (userId, symbol, quantity, options = {}) => {
     symbol,
     quantity,
     price,
+    currency: indian ? "INR" : "USD",
+    priceINR: indian ? price * usdToInr : undefined,
+    exchangeRate: usdToInr || undefined,
     type: "BUY",
   });
 
@@ -172,6 +182,8 @@ const sellStock = async (userId, symbol, quantity, options = {}) => {
   // Resolve the execution price (with quote lock / slippage protection)
   const { price, method } = await resolveExecutionPrice(userId, symbol, options);
   const totalValue = price * quantity;
+  const indian = stockService.isIndianSymbol(symbol);
+  const usdToInr = indian ? await fxService.getUsdToInr() : null;
 
   const user = await User.findById(userId);
   
@@ -196,6 +208,9 @@ const sellStock = async (userId, symbol, quantity, options = {}) => {
     symbol,
     quantity,
     price,
+    currency: indian ? "INR" : "USD",
+    priceINR: indian ? price * usdToInr : undefined,
+    exchangeRate: usdToInr || undefined,
     type: "SELL",
   });
 

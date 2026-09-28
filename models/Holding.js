@@ -19,6 +19,8 @@ const holdingSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
+    currency: { type: String, enum: ["USD", "INR"], default: "USD" },
+    averageCostUSD: { type: Number },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -9,10 +9,13 @@ const tradeRoutes = require("./routes/tradeRoutes");
 const holdingRoutes = require("./routes/holdingRoutes");
 const userRoutes = require("./routes/userRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
+const watchlistRoutes = require("./routes/watchlistRoutes");
 const streamRoutes = require("./routes/streamRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { startDailySnapshotJob } = require("./services/analysisService");
 const alpacaStream = require("./services/alpacaStream");
+const fxService = require("./services/fxService");
+const { getIndianMarketStatus } = require("./services/indianMarketService");
 const User = require("./models/User");
 const Holding = require("./models/Holding");
 
@@ -30,7 +33,17 @@ app.use("/api/trade", tradeRoutes);
 app.use("/api/holdings", holdingRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/transactions", transactionRoutes);
+app.use("/api/watchlist", watchlistRoutes);
 app.use("/api/stream", streamRoutes);
+
+app.get("/api/fx/rate", async (req, res, next) => {
+  try {
+    const usdToInr = await fxService.getUsdToInr();
+    res.json({ success: true, data: { usdToInr, inrToUsd: 1 / usdToInr } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get("/api/market/status", async (req, res, next) => {
   try {
@@ -38,7 +51,7 @@ app.get("/api/market/status", async (req, res, next) => {
     if (!market) {
       return res.status(503).json({ success: false, error: "Market status is unavailable" });
     }
-    return res.status(200).json({ success: true, data: market });
+    return res.status(200).json({ success: true, data: { ...market, indian: getIndianMarketStatus() } });
   } catch (error) {
     next(error);
   }

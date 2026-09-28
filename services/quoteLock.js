@@ -73,7 +73,9 @@ const validateLock = (quoteId, userId, symbol) => {
     return { valid: false, error: "Quote lock not found or already used" };
   }
 
-  if (lock.userId !== userId) {
+  // Mongoose may create a new ObjectId instance for every request, so compare
+  // their stable string values instead of object references.
+  if (String(lock.userId) !== String(userId)) {
     return { valid: false, error: "Quote lock belongs to a different user" };
   }
 

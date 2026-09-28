@@ -3,6 +3,12 @@ const yahooFinance = new YahooFinance();
 const ApiError = require("../utils/ApiError");
 const priceCache = require("./priceCache");
 const alpacaStream = require("./alpacaStream");
+const fxService = require("./fxService");
+
+// Yahoo index tickers do not use the .NS/.BO suffix, so list the principal
+// Indian benchmarks alongside NSE/BSE equities.
+const INDIAN_INDEX_SYMBOLS = new Set(["^NSEI", "^BSESN", "^NSEBANK"]);
+const isIndianSymbol = (symbol) => /\.(NS|BO)$/i.test(symbol) || INDIAN_INDEX_SYMBOLS.has(String(symbol).toUpperCase());
 
 /**
  * Stock Service — Fetches live market data.
@@ -23,6 +29,7 @@ const alpacaStream = require("./alpacaStream");
  */
 const getLivePrice = async (symbol) => {
   symbol = symbol.toUpperCase();
+  const indian = isIndianSymbol(symbol);
 
   // 1. Check the real-time cache first (sub-second data from WebSocket)
   const cachedPrice = priceCache.getFreshPrice(symbol);
@@ -30,16 +37,17 @@ const getLivePrice = async (symbol) => {
     return cachedPrice;
   }
 
-  // 2. Try Alpaca REST snapshot (real-time, on-demand)
-  try {
-    const snapshotPrice = await alpacaStream.getSnapshotPrice(symbol);
-    if (snapshotPrice !== null) {
-      // Also subscribe to this symbol for future real-time updates
-      alpacaStream.subscribe([symbol]);
-      return snapshotPrice;
+  // 2. Alpaca only supports US listings. NSE/BSE quotes use Yahoo.
+  if (!indian) {
+    try {
+      const snapshotPrice = await alpacaStream.getSnapshotPrice(symbol);
+      if (snapshotPrice !== null) {
+        alpacaStream.subscribe([symbol]);
+        return snapshotPrice;
+      }
+    } catch (error) {
+      console.warn(`Alpaca snapshot failed for ${symbol}, falling back to Yahoo:`, error.message);
     }
-  } catch (error) {
-    console.warn(`Alpaca snapshot failed for ${symbol}, falling back to Yahoo:`, error.message);
   }
 
   // 3. Fallback to Yahoo Finance (~15 min delayed)
@@ -47,7 +55,7 @@ const getLivePrice = async (symbol) => {
     const quote = await yahooFinance.quote(symbol);
     if (quote && quote.regularMarketPrice) {
       // Cache it so subsequent requests are faster
-      priceCache.setPrice(symbol, quote.regularMarketPrice, "yahoo-fallback");
+      priceCache.setPrice(symbol, quote.regularMarketPrice, indian ? "yahoo-india" : "yahoo-fallback");
       return quote.regularMarketPrice;
     }
     throw ApiError.notFound(`No price data found for symbol: ${symbol}`);
@@ -82,6 +90,7 @@ const getPriceInfo = (symbol) => {
  */
 const getQuote = async (symbol) => {
   symbol = symbol.toUpperCase();
+  const indian = isIndianSymbol(symbol);
 
   // Get the real-time price first
   const livePrice = await getLivePrice(symbol);
@@ -91,11 +100,14 @@ const getQuote = async (symbol) => {
   try {
     const quote = await yahooFinance.quote(symbol);
 
+    const priceUSD = indian ? livePrice * (await fxService.getInrToUsd()) : livePrice;
     return {
       symbol: quote?.symbol || symbol,
       name: quote?.shortName || quote?.longName || "N/A",
       // Use our real-time price instead of Yahoo's delayed price
       price: livePrice,
+      priceUSD,
+      priceINR: indian ? livePrice : undefined,
       priceSource: priceInfo?.source || "yahoo",
       priceAgeMs: priceInfo?.ageMs || null,
       change: quote?.regularMarketChange,
@@ -110,14 +122,18 @@ const getQuote = async (symbol) => {
       marketCap: quote?.marketCap,
       pe: quote?.trailingPE,
       exchange: quote?.fullExchangeName,
-      currency: quote?.currency,
+      currency: indian ? "INR" : "USD",
     };
   } catch (error) {
     // If Yahoo fails, return just the price we have
+    const priceUSD = indian ? livePrice * (await fxService.getInrToUsd()) : livePrice;
     return {
       symbol,
       name: "N/A",
       price: livePrice,
+      priceUSD,
+      priceINR: indian ? livePrice : undefined,
+      currency: indian ? "INR" : "USD",
       priceSource: priceInfo?.source || "unknown",
       priceAgeMs: priceInfo?.ageMs || null,
     };
@@ -134,13 +150,33 @@ const search = async (query) => {
   try {
     const results = await yahooFinance.search(query);
 
-    return (results.quotes || [])
-      .filter((item) => item.quoteType === "EQUITY")
+    // Yahoo labels exchange-traded funds separately from equities.  They are
+    // tradable instruments too, so keep them alongside shares and indices.
+    const supportedTypes = new Set(["EQUITY", "ETF", "INDEX"]);
+    const quotes = (results.quotes || [])
+      .filter((item) => supportedTypes.has(item.quoteType));
+
+    // Ensure the benchmark itself is discoverable even if Yahoo's search
+    // ranking returns related NIFTY ETFs ahead of it.
+    if (
+      /nifty\s*50/i.test(query) &&
+      !quotes.some((item) => item.symbol === "^NSEI")
+    ) {
+      quotes.unshift({
+        symbol: "^NSEI",
+        quoteType: "INDEX",
+        shortname: "NIFTY 50",
+        exchDisp: "NSE",
+        typeDisp: "INDEX",
+      });
+    }
+
+    return quotes
       .map((item) => ({
         symbol: item.symbol,
         name: item.shortname || item.longname || "N/A",
         exchange: item.exchDisp,
-        type: item.typeDisp,
+        type: item.typeDisp || item.quoteType,
       }));
   } catch (error) {
     throw ApiError.badRequest(`Search failed for "${query}".`);
@@ -213,4 +249,4 @@ const getHistory = async (symbol, period = "1mo") => {
   }
 };
 
-module.exports = { getLivePrice, getPriceInfo, getQuote, search, getHistory };
+module.exports = { getLivePrice, getPriceInfo, getQuote, search, getHistory, isIndianSymbol };
