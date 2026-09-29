@@ -357,7 +357,7 @@ function StockInfo({
     ],
   ];
   return (
-    <section className="panel flex min-h-[590px] flex-col p-5">
+    <section className="panel flex flex-col p-5">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2">
           <span className="grid size-10 place-items-center rounded-md bg-secondary font-bold text-primary">
@@ -414,7 +414,7 @@ function StockInfo({
         variant="outline"
         onClick={onAddToWatchlist}
         disabled={inWatchlist}
-        className="mt-auto h-10 w-full border-primary/30 text-primary"
+        className="mt-6 h-10 w-full border-primary/30 text-primary"
       >
         {inWatchlist ? "In watchlist" : "Add to watchlist"}
       </Button>

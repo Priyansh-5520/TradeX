@@ -159,15 +159,19 @@ function ProfilePage() {
 
   const totalPnL = useMemo(() => holdings.reduce((sum, h) => sum + h.profit, 0), [holdings]);
 
-  const allocation = useMemo(
-    () =>
-      holdings.map((h, i) => ({
-        name: h.symbol,
-        value: h.currentPriceUSD * h.quantity,
-        color: CHART_COLORS[i % CHART_COLORS.length],
-      })),
-    [holdings],
-  );
+  const allocation = useMemo(() => {
+    const rows = holdings.map((h, i) => ({
+      name: h.symbol,
+      value: h.currentPriceUSD * h.quantity,
+      color: CHART_COLORS[i % CHART_COLORS.length],
+    }));
+    const total = rows.reduce((sum, item) => sum + item.value, 0);
+
+    return rows.map((item) => ({
+      ...item,
+      percentage: total > 0 ? (item.value / total) * 100 : 0,
+    }));
+  }, [holdings]);
 
   const filtered = useMemo(
     () =>
@@ -340,41 +344,57 @@ function ProfilePage() {
             <div className="panel p-5">
               <h2 className="font-semibold">Portfolio allocation</h2>
               <p className="mt-1 text-xs text-muted-foreground">By current market value</p>
-              <div className="h-64">
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie
-                      data={allocation}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={62}
-                      outerRadius={92}
-                      paddingAngle={4}
-                    >
+              <div className="mt-3 flex flex-col items-center gap-5 sm:flex-row sm:items-start">
+                <div className="h-64 w-full sm:w-1/2">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={allocation}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={62}
+                        outerRadius={92}
+                        paddingAngle={4}
+                      >
+                        {allocation.map((item) => (
+                          <Cell key={item.name} fill={item.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          background: "var(--popover)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 6,
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="w-full overflow-hidden rounded-md border border-border sm:mt-5 sm:w-1/2">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Symbol</th>
+                        <th className="px-3 py-2 text-right font-medium">Allocation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {allocation.map((item) => (
-                        <Cell key={item.name} fill={item.color} />
+                        <tr key={item.name} className="border-t border-border">
+                          <td className="px-3 py-2 font-medium">
+                            <span className="inline-flex items-center gap-2">
+                              <i className="size-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                              {item.name}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {item.percentage.toFixed(2)}%
+                          </td>
+                        </tr>
                       ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        background: "var(--popover)",
-                        border: "1px solid var(--border)",
-                        borderRadius: 6,
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex flex-wrap justify-center gap-4">
-                {allocation.map((item) => (
-                  <span
-                    key={item.name}
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                  >
-                    <i className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    {item.name}
-                  </span>
-                ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </section>
