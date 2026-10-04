@@ -1,5 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, Clock3, Lock, TrendingDown, TrendingUp, X } from "lucide-react";
+import {
+  Activity,
+  Clock3,
+  ExternalLink,
+  Globe,
+  Lock,
+  Newspaper,
+  TrendingDown,
+  TrendingUp,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -33,6 +43,7 @@ import {
   marketApi,
   getStreamUrl,
   type MarketStatus,
+  type NewsItem,
   type QuoteData,
 } from "@/lib/api";
 
@@ -110,13 +121,26 @@ function DashboardPage() {
     try {
       const backendPeriod = periodMap[p] || "1mo";
       const res = await stockApi.getHistory(sym, backendPeriod);
-      const points: ChartPoint[] = res.data.map((pt) => ({
-        time: new Date(pt.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        price: pt.close,
-      }));
+      const isIntraday = p === "1D";
+      const points: ChartPoint[] = (res.data || [])
+        .filter((pt: any) => pt && pt.close != null && !isNaN(pt.close))
+        .map((pt: any) => {
+          const d = new Date(pt.date);
+          return {
+            time: isIntraday
+              ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+              : p === "5D"
+              ? `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+              : p === "5Y"
+              ? d.toLocaleDateString("en-US", { month: "short", year: "2-digit" })
+              : d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            price: Number(Number(pt.close).toFixed(2)),
+          };
+        });
       setChartData(points);
     } catch (err) {
       console.error("Chart fetch error:", err);
+      setChartData([]);
     }
   }, []);
 
@@ -307,6 +331,7 @@ function DashboardPage() {
             value={`$${cash.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
           />
         </div>
+        <NewsSection currentSymbol={symbol} onSelectSymbol={choose} />
       </main>
       {quote && selectedMarketOpen && (
         <TradeDialog
@@ -482,10 +507,19 @@ function ChartPanel({
       </div>
       {loading ? (
         <Skeleton className="mt-6 h-[430px]" />
+      ) : chartData.length === 0 ? (
+        <div className="mt-5 flex h-[430px] flex-col items-center justify-center rounded-lg border border-dashed border-border/60 text-center">
+          <p className="text-sm font-medium text-muted-foreground">
+            No chart data available for this timeframe
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/80">
+            Market may be closed or data is still synchronizing.
+          </p>
+        </div>
       ) : (
         <div className="mt-5 h-[430px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 12, right: 4, left: -16, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
               <defs>
                 <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.32} />
@@ -497,15 +531,23 @@ function ChartPanel({
                 dataKey="time"
                 axisLine={false}
                 tickLine={false}
+                minTickGap={28}
                 tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
               />
               <YAxis
-                domain={["dataMin - 4", "dataMax + 4"]}
+                domain={["auto", "auto"]}
                 axisLine={false}
                 tickLine={false}
+                tickFormatter={(val: number) =>
+                  quote?.currency === "INR" ? `₹${val.toLocaleString()}` : `$${val.toLocaleString()}`
+                }
                 tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
               />
               <Tooltip
+                formatter={(val: number) => [
+                  quote?.currency === "INR" ? `₹${val.toFixed(2)}` : `$${val.toFixed(2)}`,
+                  "Price",
+                ]}
                 contentStyle={{
                   background: "var(--popover)",
                   border: "1px solid var(--border)",
@@ -524,7 +566,7 @@ function ChartPanel({
         </div>
       )}
       <div className="mt-3 flex items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-        <span>NASDAQ · USD</span>
+        <span>{quote?.exchange || (quote?.currency === "INR" ? "NSE/BSE" : "US Market")} · {quote?.currency || "USD"}</span>
         <span>Updated just now</span>
       </div>
     </section>
@@ -887,5 +929,139 @@ function TradeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function NewsSection({
+  currentSymbol,
+  onSelectSymbol,
+}: {
+  currentSymbol: string;
+  onSelectSymbol: (symbol: string) => void;
+}) {
+  const [filter, setFilter] = useState<"STOCK" | "MARKET">("STOCK");
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchNews = useCallback(async (sym: string, mode: "STOCK" | "MARKET") => {
+    setLoading(true);
+    try {
+      const query = mode === "STOCK" ? sym : "stock market";
+      const res = await stockApi.getNews(query, 8);
+      setNews(res.data || []);
+    } catch (err) {
+      console.error("News fetch error:", err);
+      setNews([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNews(currentSymbol, filter);
+  }, [currentSymbol, filter, fetchNews]);
+
+  return (
+    <section className="mt-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+            Market Intelligence
+          </p>
+          <h2 className="mt-1 text-xl font-semibold">
+            {filter === "STOCK" ? `Latest News · ${currentSymbol}` : "General Market News"}
+          </h2>
+        </div>
+        <div className="flex items-center gap-1 rounded-md bg-secondary/50 p-1">
+          <Button
+            size="sm"
+            variant={filter === "STOCK" ? "secondary" : "ghost"}
+            onClick={() => setFilter("STOCK")}
+            className={`h-8 text-xs ${filter === "STOCK" ? "text-primary font-semibold" : "text-muted-foreground"}`}
+          >
+            {currentSymbol} News
+          </Button>
+          <Button
+            size="sm"
+            variant={filter === "MARKET" ? "secondary" : "ghost"}
+            onClick={() => setFilter("MARKET")}
+            className={`h-8 text-xs ${filter === "MARKET" ? "text-primary font-semibold" : "text-muted-foreground"}`}
+          >
+            <Globe className="mr-1.5 size-3.5" />
+            Market Wide
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-64 rounded-lg" />
+          ))}
+        </div>
+      ) : news.length === 0 ? (
+        <div className="panel flex h-40 flex-col items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          <Newspaper className="mb-2 size-8 text-muted-foreground/60" />
+          <p>No recent news found for this selection.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {news.map((item) => (
+            <a
+              key={item.id}
+              href={item.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="panel group flex flex-col justify-between overflow-hidden p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+            >
+              <div>
+                {item.thumbnailUrl ? (
+                  <div className="mb-3 aspect-video w-full overflow-hidden rounded-md bg-secondary">
+                    <img
+                      src={item.thumbnailUrl}
+                      alt={item.title}
+                      className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : (
+                  <div className="mb-3 flex aspect-video w-full items-center justify-center rounded-md bg-secondary/60 text-muted-foreground">
+                    <Newspaper className="size-8 opacity-40" />
+                  </div>
+                )}
+                <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span className="truncate font-semibold text-primary/80">{item.publisher}</span>
+                  <span className="shrink-0">{item.timeAgo}</span>
+                </div>
+                <h3 className="line-clamp-3 text-sm font-semibold leading-snug transition-colors group-hover:text-primary">
+                  {item.title}
+                </h3>
+              </div>
+              <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+                <div className="flex flex-wrap gap-1">
+                  {item.relatedTickers.slice(0, 3).map((tick) => (
+                    <button
+                      key={tick}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onSelectSymbol(tick);
+                      }}
+                      className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground hover:bg-primary/20 hover:text-primary"
+                    >
+                      {tick}
+                    </button>
+                  ))}
+                </div>
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors group-hover:text-primary">
+                  Read <ExternalLink className="size-3" />
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

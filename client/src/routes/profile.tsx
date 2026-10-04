@@ -266,14 +266,21 @@ function ProfilePage() {
         </div>
 
         {/* Holdings table */}
-        {holdings.length > 0 && (
-          <section className="mt-8">
-            <div className="mb-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-                Positions
-              </p>
-              <h2 className="mt-1 text-xl font-semibold">Your holdings</h2>
+        <section className="mt-8">
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              Positions
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">Your holdings</h2>
+          </div>
+          {holdings.length === 0 ? (
+            <div className="panel flex flex-col items-center justify-center p-8 text-center text-sm text-muted-foreground">
+              <p>You don't own any stocks yet.</p>
+              <Button asChild size="sm" className="mt-3">
+                <Link to="/dashboard">Explore & Trade Stocks</Link>
+              </Button>
             </div>
+          ) : (
             <div className="panel overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="border-b border-border bg-secondary/30 text-left text-xs uppercase text-muted-foreground">
@@ -335,8 +342,8 @@ function ProfilePage() {
                 </tbody>
               </table>
             </div>
-          </section>
-        )}
+          )}
+        </section>
 
         {/* Analytics */}
         {holdings.length > 0 && (

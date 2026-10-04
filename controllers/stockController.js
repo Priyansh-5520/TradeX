@@ -62,4 +62,26 @@ const getHistory = async (req, res, next) => {
   }
 };
 
-module.exports = { getQuote, searchStocks, getHistory };
+/**
+ * GET /api/stocks/news/:symbol? — Get news articles for symbol or market
+ */
+const getNews = async (req, res, next) => {
+  try {
+    const newsService = require("../services/newsService");
+    const query = req.params.symbol || req.query.q || "stock market";
+    const count = parseInt(req.query.count, 10) || 8;
+
+    const news = await newsService.getNews(query, count);
+
+    return res.status(200).json({
+      success: true,
+      query,
+      count: news.length,
+      data: news,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getQuote, searchStocks, getHistory, getNews };

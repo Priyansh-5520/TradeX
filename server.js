@@ -51,7 +51,15 @@ app.get("/api/market/status", async (req, res, next) => {
     if (!market) {
       return res.status(503).json({ success: false, error: "Market status is unavailable" });
     }
-    return res.status(200).json({ success: true, data: { ...market, indian: getIndianMarketStatus() } });
+    const bypass = process.env.BYPASS_MARKET_HOURS === "true";
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...market,
+        isOpen: bypass ? true : market.isOpen,
+        indian: bypass ? { ...getIndianMarketStatus(), isOpen: true } : getIndianMarketStatus(),
+      },
+    });
   } catch (error) {
     next(error);
   }

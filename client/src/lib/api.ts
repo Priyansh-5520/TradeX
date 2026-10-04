@@ -85,6 +85,11 @@ export const stockApi = {
     request<{ success: boolean; data: HistoryPoint[] }>(
       `/stocks/history/${symbol}?period=${period}`,
     ),
+
+  getNews: (symbol?: string, count = 8) =>
+    request<{ success: boolean; count: number; data: NewsItem[] }>(
+      symbol ? `/stocks/news/${encodeURIComponent(symbol)}?count=${count}` : `/stocks/news?count=${count}`,
+    ),
 };
 
 export const marketApi = {
@@ -263,4 +268,16 @@ export type TransactionData = {
   price: number;
   total: number;
   createdAt: string;
+};
+
+export type NewsItem = {
+  id: string;
+  title: string;
+  publisher: string;
+  link: string;
+  publishedAt: string;
+  timeAgo: string;
+  thumbnailUrl: string | null;
+  type?: string;
+  relatedTickers: string[];
 };

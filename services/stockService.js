@@ -195,15 +195,20 @@ const getHistory = async (symbol, period = "1mo") => {
     const now = new Date();
     const period1 = new Date();
     let interval = "1d";
+    let isIntraday1D = false;
     
     switch (period) {
       case "1d":
-        period1.setDate(now.getDate() - 1);
-        interval = "5m"; // Need finer granularity for 1 day
+        // Look back up to 7 days to guarantee capturing the last active trading session
+        // even during 3-day weekends or exchange holidays
+        period1.setDate(now.getDate() - 7);
+        interval = "5m"; // Finer granularity for 1 day
+        isIntraday1D = true;
         break;
       case "5d":
-        period1.setDate(now.getDate() - 5);
-        interval = "15m"; // Need finer granularity for 5 days
+        // Look back 8 days so weekends don't reduce the trading day sample
+        period1.setDate(now.getDate() - 8);
+        interval = "15m"; // 15-minute granularity for 5 days
         break;
       case "1mo":
         period1.setMonth(now.getMonth() - 1);
@@ -231,17 +236,34 @@ const getHistory = async (symbol, period = "1mo") => {
 
     const result = await yahooFinance.chart(symbol, { period1, interval });
 
-    if (!result || !result.quotes || result.quotes.length === 0) {
+    let quotes = (result?.quotes || []).filter(
+      (candle) => candle && candle.close != null
+    );
+
+    if (quotes.length === 0) {
       throw ApiError.notFound(`No historical data found for symbol: ${symbol}`);
     }
 
-    return result.quotes.map((candle) => ({
+    // For 1-day intraday:
+    // If the market was closed recently (e.g. weekend/holidays), isolate the most recent active trading day
+    if (isIntraday1D) {
+      const lastQuote = quotes[quotes.length - 1];
+      const lastTradingDay = new Date(lastQuote.date).toISOString().slice(0, 10);
+      const dayQuotes = quotes.filter(
+        (q) => new Date(q.date).toISOString().slice(0, 10) === lastTradingDay
+      );
+      if (dayQuotes.length > 0) {
+        quotes = dayQuotes;
+      }
+    }
+
+    return quotes.map((candle) => ({
       date: candle.date,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
+      open: candle.open ?? candle.close,
+      high: candle.high ?? candle.close,
+      low: candle.low ?? candle.close,
       close: candle.close,
-      volume: candle.volume,
+      volume: candle.volume ?? 0,
     }));
   } catch (error) {
     if (error instanceof ApiError) throw error;

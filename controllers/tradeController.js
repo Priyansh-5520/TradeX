@@ -6,6 +6,7 @@ const { getIndianMarketStatus } = require("../services/indianMarketService");
 const ApiError = require("../utils/ApiError");
 
 const requireOpenMarket = async () => {
+  if (process.env.BYPASS_MARKET_HOURS === "true") return;
   const market = await alpacaStream.getMarketStatus();
   if (!market) {
     throw ApiError.badRequest("Market status is unavailable. Please try again shortly.");
@@ -19,6 +20,7 @@ const requireOpenMarketForSymbol = async (symbol) => {
   if (["^NSEI", "^BSESN", "^NSEBANK"].includes(String(symbol).toUpperCase())) {
     throw ApiError.badRequest("Market indices such as NIFTY 50 are view-only and cannot be traded.");
   }
+  if (process.env.BYPASS_MARKET_HOURS === "true") return;
   if (/\.(NS|BO)$/i.test(symbol)) {
     if (!getIndianMarketStatus().isOpen) {
       throw ApiError.badRequest("The Indian stock market is closed. NSE/BSE trading is available Monday–Friday, 09:15–15:30 IST.");
