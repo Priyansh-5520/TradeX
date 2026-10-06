@@ -239,7 +239,7 @@ const getTransactions = async (userId, filters = {}) => {
   const limit = filters.limit ? parseInt(filters.limit) : 50;
 
   const transactions = await Transaction.find(query)
-    .sort({ timestamp: -1 })
+    .sort({ createdAt: -1, timestamp: -1 })
     .limit(limit);
 
   return transactions;

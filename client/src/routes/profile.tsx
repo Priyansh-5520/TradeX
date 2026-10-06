@@ -80,7 +80,8 @@ function ProfilePage() {
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [type, setType] = useState("ALL");
   const [symbol, setSymbol] = useState("ALL");
-  const [sortAsc, setSortAsc] = useState(false);
+  const [sortBy, setSortBy] = useState<"date" | "price">("date");
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [memberSince, setMemberSince] = useState("");
   const [sellHolding, setSellHolding] = useState<HoldingData | null>(null);
 
@@ -179,8 +180,15 @@ function ProfilePage() {
         .filter(
           (t) => (type === "ALL" || t.type === type) && (symbol === "ALL" || t.symbol === symbol),
         )
-        .toSorted((a, b) => (sortAsc ? a.price - b.price : b.price - a.price)),
-    [transactions, type, symbol, sortAsc],
+        .toSorted((a, b) => {
+          if (sortBy === "price") {
+            return sortOrder === "asc" ? a.price - b.price : b.price - a.price;
+          }
+          const timeA = new Date(a.createdAt || (a as any).timestamp || 0).getTime();
+          const timeB = new Date(b.createdAt || (b as any).timestamp || 0).getTime();
+          return sortOrder === "asc" ? timeA - timeB : timeB - timeA;
+        }),
+    [transactions, type, symbol, sortBy, sortOrder],
   );
 
   const uniqueSymbols = useMemo(
@@ -451,16 +459,47 @@ function ProfilePage() {
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="border-b border-border bg-secondary/30 text-left text-xs uppercase text-muted-foreground">
                   <tr>
-                    <th className="px-5 py-3 font-medium">Date</th>
+                    <th className="px-5 py-3 font-medium">
+                      <button
+                        onClick={() => {
+                          if (sortBy === "date") {
+                            setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
+                          } else {
+                            setSortBy("date");
+                            setSortOrder("desc");
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 font-medium hover:text-foreground"
+                      >
+                        Date <ArrowUpDown className="size-3" />
+                        {sortBy === "date" && (
+                          <span className="text-[10px] font-normal text-primary">
+                            ({sortOrder === "desc" ? "newest" : "oldest"})
+                          </span>
+                        )}
+                      </button>
+                    </th>
                     <th className="px-5 font-medium">Type</th>
                     <th className="px-5 font-medium">Symbol</th>
                     <th className="px-5 font-medium">Quantity</th>
                     <th className="px-5 font-medium">
                       <button
-                        onClick={() => setSortAsc(!sortAsc)}
-                        className="inline-flex items-center gap-1"
+                        onClick={() => {
+                          if (sortBy === "price") {
+                            setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
+                          } else {
+                            setSortBy("price");
+                            setSortOrder("desc");
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 font-medium hover:text-foreground"
                       >
                         Price <ArrowUpDown className="size-3" />
+                        {sortBy === "price" && (
+                          <span className="text-[10px] font-normal text-primary">
+                            ({sortOrder === "desc" ? "high" : "low"})
+                          </span>
+                        )}
                       </button>
                     </th>
                     <th className="px-5 font-medium">Total value</th>
@@ -469,12 +508,20 @@ function ProfilePage() {
                 <tbody className="divide-y divide-border">
                   {filtered.map((item) => (
                     <tr key={item._id}>
-                      <td className="px-5 py-4 text-muted-foreground">
-                        {new Date(item.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                      <td className="px-5 py-4 tabular-nums text-muted-foreground">
+                        <div>
+                          {new Date(item.createdAt || (item as any).timestamp).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground/70">
+                          {new Date(item.createdAt || (item as any).timestamp).toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </div>
                       </td>
                       <td className="px-5">
                         <span

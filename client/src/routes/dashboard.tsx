@@ -371,14 +371,15 @@ function StockInfo({
     if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
     return n.toLocaleString();
   };
+  const currSym = quote.currency === "INR" ? "₹" : "$";
   const rows = [
-    ["Day high", `$${quote.dayHigh?.toFixed(2) ?? "—"}`],
-    ["Day low", `$${quote.dayLow?.toFixed(2) ?? "—"}`],
-    ["Volume", formatNum(quote.volume || 0)],
-    ["Market cap", formatNum(quote.marketCap || 0)],
+    ["Day high", `${currSym}${quote.dayHigh?.toFixed(2) ?? "—"}`],
+    ["Day low", `${currSym}${quote.dayLow?.toFixed(2) ?? "—"}`],
+    ["Volume", quote.volume ? formatNum(quote.volume) : isIndex ? "N/A" : "0"],
+    ["Market cap", quote.marketCap ? formatNum(quote.marketCap) : isIndex ? "N/A (Index)" : "—"],
     [
       "52-week range",
-      `$${quote.fiftyTwoWeekLow?.toFixed(2) ?? "?"} — $${quote.fiftyTwoWeekHigh?.toFixed(2) ?? "?"}`,
+      `${currSym}${quote.fiftyTwoWeekLow?.toFixed(2) ?? "?"} — ${currSym}${quote.fiftyTwoWeekHigh?.toFixed(2) ?? "?"}`,
     ],
   ];
   return (
@@ -459,6 +460,11 @@ function StockInfo({
           Sell
         </Button>
       </div>
+      {isIndex && (
+        <p className="mt-3 rounded-md bg-secondary/60 p-2 text-center text-xs text-muted-foreground">
+          Indices like <span className="font-semibold text-foreground">NIFTY 50</span> are benchmark indicators and cannot be traded directly. Search constituent stocks like <span className="font-semibold text-primary">RELIANCE</span> or <span className="font-semibold text-primary">TCS</span> to trade.
+        </p>
+      )}
     </section>
   );
 }
